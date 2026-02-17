@@ -16,7 +16,7 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "CollabBoard",
+  title: "Test",
   description: "Real-time collaborative whiteboard",
 };
 
