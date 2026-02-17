@@ -28,7 +28,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
       } else {
         await signUp(email, password);
       }
-      router.push("/board/test");
+      router.push("/board/75a6825f-5148-4f94-b552-e5319b544dc3");
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -42,7 +42,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
     try {
       await signInWithGoogle();
-      router.push("/board/test");
+      router.push("/board/75a6825f-5148-4f94-b552-e5319b544dc3");
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
