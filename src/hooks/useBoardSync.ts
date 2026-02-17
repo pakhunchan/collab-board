@@ -34,6 +34,23 @@ export function useBoardSync(
   );
   const lastLiveMoveRef = useRef<number>(0);
   const liveMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingBroadcasts = useRef<
+    Array<{ event: string; payload: Record<string, unknown> }>
+  >([]);
+
+  // Drain any queued broadcasts once the channel is ready
+  const drainPendingBroadcasts = useCallback(() => {
+    if (!channelRef.current || !connectedRef.current) return;
+    const queued = pendingBroadcasts.current;
+    pendingBroadcasts.current = [];
+    for (const msg of queued) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: msg.event,
+        payload: msg.payload,
+      });
+    }
+  }, []);
 
   // DB write helpers (fire-and-forget)
   const persistCreate = useCallback(
@@ -72,49 +89,38 @@ export function useBoardSync(
               headers,
               body: JSON.stringify(write.object),
             });
-            // Add to store so it appears after a fresh page load
             useBoardStore.getState().applyRemoteCreate(write.object);
-            // Broadcast so other clients see it
-            if (channelRef.current && connectedRef.current) {
-              channelRef.current.send({
-                type: "broadcast",
-                event: "object:create",
-                payload: { senderId: user!.uid, object: write.object },
-              });
-            }
+            pendingBroadcasts.current.push({
+              event: "object:create",
+              payload: { senderId: user!.uid, object: write.object },
+            });
           } else if (write.type === "update") {
             await fetch(`/api/boards/${boardId}/objects/${write.objectId}`, {
               method: "PATCH",
               headers,
               body: JSON.stringify(write.changes),
             });
-            if (channelRef.current && connectedRef.current) {
-              channelRef.current.send({
-                type: "broadcast",
-                event: "object:update",
-                payload: { senderId: user!.uid, objectId: write.objectId, changes: write.changes },
-              });
-            }
+            pendingBroadcasts.current.push({
+              event: "object:update",
+              payload: { senderId: user!.uid, objectId: write.objectId, changes: write.changes },
+            });
           } else if (write.type === "delete") {
             await fetch(`/api/boards/${boardId}/objects/${write.objectId}`, {
               method: "DELETE",
               headers,
             });
-            if (channelRef.current && connectedRef.current) {
-              channelRef.current.send({
-                type: "broadcast",
-                event: "object:delete",
-                payload: { senderId: user!.uid, objectId: write.objectId },
-              });
-            }
+            pendingBroadcasts.current.push({
+              event: "object:delete",
+              payload: { senderId: user!.uid, objectId: write.objectId },
+            });
           }
         } catch (err) {
           console.error("Failed to flush pending write:", err);
-          // If flush fails, keep the queue and bail out
           return;
         }
       }
       clearPendingWrites(boardId!);
+      drainPendingBroadcasts();
     }
 
     async function fetchObjects() {
@@ -132,14 +138,12 @@ export function useBoardSync(
           const localOnly = useBoardStore.getState().reconcileObjects(data);
           for (const obj of localOnly) {
             persistCreate(obj);
-            if (channelRef.current && connectedRef.current) {
-              channelRef.current.send({
-                type: "broadcast",
-                event: "object:create",
-                payload: { senderId: user!.uid, object: obj },
-              });
-            }
+            pendingBroadcasts.current.push({
+              event: "object:create",
+              payload: { senderId: user!.uid, object: obj },
+            });
           }
+          drainPendingBroadcasts();
           // Reconciliation handled everything — clear stale pending writes
           // so they don't replay with outdated snapshots.
           clearPendingWrites(boardId!);
@@ -159,7 +163,7 @@ export function useBoardSync(
     return () => {
       cancelled = true;
     };
-  }, [boardId, user, reconnectKey, persistCreate]);
+  }, [boardId, user, reconnectKey, persistCreate, drainPendingBroadcasts]);
 
   const persistUpdate = useCallback(
     async (objectId: string, changes: Partial<BoardObject>) => {
@@ -249,6 +253,7 @@ export function useBoardSync(
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
+        drainPendingBroadcasts();
       } else if (
         status === "CLOSED" ||
         status === "CHANNEL_ERROR" ||
@@ -264,7 +269,7 @@ export function useBoardSync(
       channelRef.current = null;
       channel.unsubscribe();
     };
-  }, [boardId, user, reconnectKey, onChannelStatus]);
+  }, [boardId, user, reconnectKey, onChannelStatus, drainPendingBroadcasts]);
 
   // Cleanup debounce timers on unmount
   useEffect(() => {
