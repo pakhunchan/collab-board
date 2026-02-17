@@ -29,6 +29,9 @@ interface BoardStore {
   applyRemoteUpdate: (id: string, changes: Partial<BoardObject>) => void;
   applyRemoteDelete: (id: string) => void;
 
+  // Persistence
+  loadObjects: (objects: BoardObject[]) => void;
+
   // Selection
   selectedIds: string[];
   setSelectedIds: (ids: string[]) => void;
@@ -110,6 +113,14 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         selectedIds: state.selectedIds.filter((sid) => sid !== id),
       };
     }),
+
+  loadObjects: (objects) => {
+    const map: Record<string, BoardObject> = {};
+    for (const obj of objects) {
+      map[obj.id] = obj;
+    }
+    set({ objects: map, selectedIds: [] });
+  },
 
   selectedIds: [],
   setSelectedIds: (ids) => set({ selectedIds: ids }),

@@ -2,15 +2,105 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { User } from "firebase/auth";
 import { useAuth } from "@/lib/auth-context";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useBoardStore } from "@/stores/boardStore";
 import { BoardObject, BoardObjectType } from "@/types/board";
 
+async function getAuthHeaders(user: User) {
+  const token = await user.getIdToken();
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
+
 export function useBoardSync(boardId: string | undefined) {
   const { user } = useAuth();
   const channelRef = useRef<RealtimeChannel | null>(null);
   const connectedRef = useRef(false);
+  const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+
+  // Fetch objects on mount
+  useEffect(() => {
+    if (!boardId || !user) return;
+
+    let cancelled = false;
+
+    async function fetchObjects() {
+      try {
+        const headers = await getAuthHeaders(user!);
+        const res = await fetch(`/api/boards/${boardId}/objects`, { headers });
+        if (!res.ok) return;
+        const data: BoardObject[] = await res.json();
+        if (!cancelled) {
+          useBoardStore.getState().loadObjects(data);
+        }
+      } catch (err) {
+        console.error("Failed to load board objects:", err);
+      }
+    }
+
+    fetchObjects();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId, user]);
+
+  // DB write helpers (fire-and-forget)
+  const persistCreate = useCallback(
+    async (obj: BoardObject) => {
+      if (!boardId || !user) return;
+      try {
+        const headers = await getAuthHeaders(user);
+        await fetch(`/api/boards/${boardId}/objects`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(obj),
+        });
+      } catch (err) {
+        console.error("Failed to persist create:", err);
+      }
+    },
+    [boardId, user]
+  );
+
+  const persistUpdate = useCallback(
+    async (objectId: string, changes: Partial<BoardObject>) => {
+      if (!boardId || !user) return;
+      try {
+        const headers = await getAuthHeaders(user);
+        await fetch(`/api/boards/${boardId}/objects/${objectId}`, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(changes),
+        });
+      } catch (err) {
+        console.error("Failed to persist update:", err);
+      }
+    },
+    [boardId, user]
+  );
+
+  const persistDelete = useCallback(
+    async (objectId: string) => {
+      if (!boardId || !user) return;
+      try {
+        const headers = await getAuthHeaders(user);
+        await fetch(`/api/boards/${boardId}/objects/${objectId}`, {
+          method: "DELETE",
+          headers,
+        });
+      } catch (err) {
+        console.error("Failed to persist delete:", err);
+      }
+    },
+    [boardId, user]
+  );
 
   // Channel lifecycle
   useEffect(() => {
@@ -29,8 +119,6 @@ export function useBoardSync(boardId: string | undefined) {
     channelRef.current = channel;
 
     // Incoming: object:create
-    // Note: self:false already prevents receiving our own broadcasts,
-    // so no senderId check needed (would break same-user multi-tab sync)
     channel.on(
       "broadcast",
       { event: "object:create" },
@@ -76,6 +164,15 @@ export function useBoardSync(boardId: string | undefined) {
     };
   }, [boardId, user]);
 
+  // Cleanup debounce timers on unmount
+  useEffect(() => {
+    const timers = debounceTimers.current;
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
+
   // Outgoing: broadcastCreate
   const broadcastCreate = useCallback(
     (type: BoardObjectType, x: number, y: number) => {
@@ -102,9 +199,11 @@ export function useBoardSync(boardId: string | undefined) {
         });
       }
 
+      persistCreate(fullObj);
+
       return fullObj;
     },
-    [boardId, user]
+    [boardId, user, persistCreate]
   );
 
   // Outgoing: broadcastUpdate
@@ -128,13 +227,31 @@ export function useBoardSync(boardId: string | undefined) {
           },
         });
       }
+
+      // Debounced DB write (300ms per object)
+      const existing = debounceTimers.current.get(id);
+      if (existing) clearTimeout(existing);
+      debounceTimers.current.set(
+        id,
+        setTimeout(() => {
+          debounceTimers.current.delete(id);
+          persistUpdate(id, broadcastChanges);
+        }, 300)
+      );
     },
-    [user]
+    [user, persistUpdate]
   );
 
   // Outgoing: broadcastDelete
   const broadcastDelete = useCallback(
     (id: string) => {
+      // Cancel any pending debounced update for this object
+      const pending = debounceTimers.current.get(id);
+      if (pending) {
+        clearTimeout(pending);
+        debounceTimers.current.delete(id);
+      }
+
       const store = useBoardStore.getState();
       store.deleteObject(id);
 
@@ -148,8 +265,10 @@ export function useBoardSync(boardId: string | undefined) {
           },
         });
       }
+
+      persistDelete(id);
     },
-    [user]
+    [user, persistDelete]
   );
 
   return { broadcastCreate, broadcastUpdate, broadcastDelete };
