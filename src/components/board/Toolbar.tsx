@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { useBoardStore, Tool } from "@/stores/boardStore";
+import PresenceBar from "@/components/board/PresenceBar";
 
 const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "select", label: "Select", icon: "↖" },
@@ -35,6 +36,7 @@ export default function Toolbar({ boardId }: { boardId: string }) {
       </div>
 
       <div className="flex items-center gap-3">
+        <PresenceBar />
         <span className="text-xs text-gray-400 font-mono">{boardId}</span>
         <button
           onClick={signOut}

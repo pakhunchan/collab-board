@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { useAuth } from "@/lib/auth-context";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { uidToColor } from "@/lib/presence-colors";
+import { usePresenceStore } from "@/stores/presenceStore";
 
 export interface CursorPosition {
   uid: string;
@@ -12,19 +14,6 @@ export interface CursorPosition {
   y: number;
   color: string;
   lastSeen: number;
-}
-
-const CURSOR_COLORS = [
-  "#e53935", "#8e24aa", "#3949ab", "#039be5", "#00897b",
-  "#43a047", "#c0ca33", "#ffb300", "#f4511e", "#6d4c41",
-];
-
-function uidToColor(uid: string): string {
-  let hash = 0;
-  for (let i = 0; i < uid.length; i++) {
-    hash = ((hash << 5) - hash + uid.charCodeAt(i)) | 0;
-  }
-  return CURSOR_COLORS[Math.abs(hash) % CURSOR_COLORS.length];
 }
 
 const THROTTLE_MS = 50;
@@ -105,7 +94,21 @@ export function useCursors(boardId: string | undefined) {
       }
     );
 
-    // 3. Subscribe AFTER listeners
+    // 3. Register presence sync listener for online users
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState();
+      const uniqueUsers = new Map<string, { uid: string; name: string; color: string }>();
+      for (const presences of Object.values(state)) {
+        for (const p of presences as unknown as Array<{ uid: string; name: string }>) {
+          if (p.uid && !uniqueUsers.has(p.uid)) {
+            uniqueUsers.set(p.uid, { uid: p.uid, name: p.name || "Anonymous", color: uidToColor(p.uid) });
+          }
+        }
+      }
+      usePresenceStore.getState().setOnlineUsers(Array.from(uniqueUsers.values()));
+    });
+
+    // 4. Subscribe AFTER listeners
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
@@ -122,6 +125,7 @@ export function useCursors(boardId: string | undefined) {
       // during React strict mode's unmount-remount cycle
       channel.unsubscribe();
       setRemoteCursors(new Map());
+      usePresenceStore.getState().setOnlineUsers([]);
     };
   }, [boardId, user]);
 
