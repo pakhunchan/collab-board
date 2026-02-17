@@ -74,17 +74,39 @@ export function useBoardSync(
             });
             // Add to store so it appears after a fresh page load
             useBoardStore.getState().applyRemoteCreate(write.object);
+            // Broadcast so other clients see it
+            if (channelRef.current && connectedRef.current) {
+              channelRef.current.send({
+                type: "broadcast",
+                event: "object:create",
+                payload: { senderId: user!.uid, object: write.object },
+              });
+            }
           } else if (write.type === "update") {
             await fetch(`/api/boards/${boardId}/objects/${write.objectId}`, {
               method: "PATCH",
               headers,
               body: JSON.stringify(write.changes),
             });
+            if (channelRef.current && connectedRef.current) {
+              channelRef.current.send({
+                type: "broadcast",
+                event: "object:update",
+                payload: { senderId: user!.uid, objectId: write.objectId, changes: write.changes },
+              });
+            }
           } else if (write.type === "delete") {
             await fetch(`/api/boards/${boardId}/objects/${write.objectId}`, {
               method: "DELETE",
               headers,
             });
+            if (channelRef.current && connectedRef.current) {
+              channelRef.current.send({
+                type: "broadcast",
+                event: "object:delete",
+                payload: { senderId: user!.uid, objectId: write.objectId },
+              });
+            }
           }
         } catch (err) {
           console.error("Failed to flush pending write:", err);
@@ -104,19 +126,29 @@ export function useBoardSync(
         if (cancelled) return;
 
         if (reconnectKey > 0) {
-          // Reconnection: reconcile remote with local state
+          // Reconnection: reconcile remote with local state.
+          // The store already has the correct final state in memory,
+          // so reconcile handles merging + we persist/broadcast local-only objects.
           const localOnly = useBoardStore.getState().reconcileObjects(data);
-          // Persist any objects created while offline
           for (const obj of localOnly) {
             persistCreate(obj);
+            if (channelRef.current && connectedRef.current) {
+              channelRef.current.send({
+                type: "broadcast",
+                event: "object:create",
+                payload: { senderId: user!.uid, object: obj },
+              });
+            }
           }
+          // Reconciliation handled everything — clear stale pending writes
+          // so they don't replay with outdated snapshots.
+          clearPendingWrites(boardId!);
         } else {
-          // Initial load
+          // Initial load (fresh page)
           useBoardStore.getState().loadObjects(data);
+          // Flush any pending writes from a previous offline session
+          await flushPendingWrites(await getAuthHeaders(user!));
         }
-
-        // Flush any pending writes from a previous offline session
-        await flushPendingWrites(await getAuthHeaders(user!));
       } catch (err) {
         console.error("Failed to load board objects:", err);
       }
