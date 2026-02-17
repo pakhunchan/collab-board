@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
 import { Stage, Layer, Circle, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
@@ -63,10 +62,17 @@ function DotGrid({
   );
 }
 
-export default function Canvas() {
-  const params = useParams();
-  const boardId = params?.id as string | undefined;
+interface CanvasProps {
+  boardId: string;
+  reconnectKey?: number;
+  onChannelStatus?: (channelId: string, status: string) => void;
+}
 
+export default function Canvas({
+  boardId,
+  reconnectKey = 0,
+  onChannelStatus,
+}: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
@@ -77,10 +83,10 @@ export default function Canvas() {
   const isDraggingObject = useRef(false);
 
   // Real-time cursors
-  const { remoteCursors, handleCursorMove } = useCursors(boardId);
+  const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove } = useBoardSync(boardId);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove } = useBoardSync(boardId, reconnectKey, onChannelStatus);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);

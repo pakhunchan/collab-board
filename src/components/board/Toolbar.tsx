@@ -3,6 +3,8 @@
 import { useAuth } from "@/lib/auth-context";
 import { useBoardStore, Tool } from "@/stores/boardStore";
 import PresenceBar from "@/components/board/PresenceBar";
+import ConnectionStatusIndicator from "@/components/board/ConnectionStatus";
+import type { ConnectionStatus } from "@/hooks/useConnectionManager";
 
 const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "select", label: "Select", icon: "↖" },
@@ -11,7 +13,13 @@ const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "rectangle", label: "Rectangle", icon: "□" },
 ];
 
-export default function Toolbar({ boardId }: { boardId: string }) {
+export default function Toolbar({
+  boardId,
+  connectionStatus,
+}: {
+  boardId: string;
+  connectionStatus: ConnectionStatus;
+}) {
   const activeTool = useBoardStore((s) => s.activeTool);
   const setActiveTool = useBoardStore((s) => s.setActiveTool);
   const { signOut } = useAuth();
@@ -36,6 +44,7 @@ export default function Toolbar({ boardId }: { boardId: string }) {
       </div>
 
       <div className="flex items-center gap-3">
+        <ConnectionStatusIndicator status={connectionStatus} />
         <PresenceBar />
         <span className="text-xs text-gray-400 font-mono">{boardId}</span>
         <button
