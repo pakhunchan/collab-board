@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
+    "@xstate/react": "^6.0.0",
     "firebase": "^12.9.0",
     "firebase-admin": "^13.6.1",
     "konva": "^10.2.0",
@@ -17,6 +18,8 @@
     "react": "^18",
     "react-dom": "^18",
     "react-konva": "^18.2.14",
+    "sonner": "^2.0.7",
+    "xstate": "^5.28.0",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
