@@ -1,11 +1,14 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { Stage, Layer, Circle, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
+import { useCursors } from "@/hooks/useCursors";
 import StickyNote from "./StickyNote";
 import RectShape from "./RectShape";
+import Cursors from "./Cursors";
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
@@ -60,6 +63,9 @@ function DotGrid({
 }
 
 export default function Canvas() {
+  const params = useParams();
+  const boardId = params?.id as string | undefined;
+
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
@@ -68,6 +74,9 @@ export default function Canvas() {
   const [isPanning, setIsPanning] = useState(false);
   const spaceHeld = useRef(false);
   const isDraggingObject = useRef(false);
+
+  // Real-time cursors
+  const { remoteCursors, handleCursorMove } = useCursors(boardId);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -284,6 +293,16 @@ export default function Canvas() {
 
   const sortedObjects = Object.values(objects).sort((a, b) => a.zIndex - b.zIndex);
 
+  const handleMouseMove = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return;
+    const worldX = (pointer.x - stagePos.x) / scale;
+    const worldY = (pointer.y - stagePos.y) / scale;
+    handleCursorMove(worldX, worldY);
+  }, [stagePos, scale, handleCursorMove]);
+
   const cursorForTool = () => {
     if (isPanning) return "grab";
     if (activeTool === "sticky" || activeTool === "rectangle") return "crosshair";
@@ -315,6 +334,7 @@ export default function Canvas() {
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onClick={handleStageClick}
+        onMouseMove={handleMouseMove}
       >
         <Layer listening={false}>
           <DotGrid
@@ -353,6 +373,9 @@ export default function Canvas() {
               return newBox;
             }}
           />
+        </Layer>
+        <Layer listening={false}>
+          <Cursors remoteCursors={remoteCursors} scale={scale} />
         </Layer>
       </Stage>
 
