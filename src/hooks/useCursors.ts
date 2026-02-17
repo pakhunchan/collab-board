@@ -19,7 +19,11 @@ export interface CursorPosition {
 const THROTTLE_MS = 50;
 const STALE_MS = 3000;
 
-export function useCursors(boardId: string | undefined) {
+export function useCursors(
+  boardId: string | undefined,
+  reconnectKey = 0,
+  onChannelStatus?: (channelId: string, status: string) => void
+) {
   const { user } = useAuth();
   const [remoteCursors, setRemoteCursors] = useState<Map<string, CursorPosition>>(new Map());
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -109,13 +113,19 @@ export function useCursors(boardId: string | undefined) {
     });
 
     // 4. Subscribe AFTER listeners
+    const channelName = `board:${boardId}`;
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
         channel.track({ uid: myUid, name: myName });
-      } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+      } else if (
+        status === "CLOSED" ||
+        status === "CHANNEL_ERROR" ||
+        status === "TIMED_OUT"
+      ) {
         connectedRef.current = false;
       }
+      onChannelStatus?.(channelName, status);
     });
 
     return () => {
@@ -127,7 +137,7 @@ export function useCursors(boardId: string | undefined) {
       setRemoteCursors(new Map());
       usePresenceStore.getState().setOnlineUsers([]);
     };
-  }, [boardId, user]);
+  }, [boardId, user, reconnectKey, onChannelStatus]);
 
   // Stale cursor cleanup every 3 seconds
   useEffect(() => {

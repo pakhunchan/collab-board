@@ -7,6 +7,11 @@ import { useAuth } from "@/lib/auth-context";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useBoardStore } from "@/stores/boardStore";
 import { BoardObject, BoardObjectType } from "@/types/board";
+import {
+  addPendingWrite,
+  getPendingWrites,
+  clearPendingWrites,
+} from "@/lib/pendingWrites";
 
 async function getAuthHeaders(user: User) {
   const token = await user.getIdToken();
@@ -16,7 +21,11 @@ async function getAuthHeaders(user: User) {
   };
 }
 
-export function useBoardSync(boardId: string | undefined) {
+export function useBoardSync(
+  boardId: string | undefined,
+  reconnectKey = 0,
+  onChannelStatus?: (channelId: string, status: string) => void
+) {
   const { user } = useAuth();
   const channelRef = useRef<RealtimeChannel | null>(null);
   const connectedRef = useRef(false);
@@ -25,33 +34,6 @@ export function useBoardSync(boardId: string | undefined) {
   );
   const lastLiveMoveRef = useRef<number>(0);
   const liveMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Fetch objects on mount
-  useEffect(() => {
-    if (!boardId || !user) return;
-
-    let cancelled = false;
-
-    async function fetchObjects() {
-      try {
-        const headers = await getAuthHeaders(user!);
-        const res = await fetch(`/api/boards/${boardId}/objects`, { headers });
-        if (!res.ok) return;
-        const data: BoardObject[] = await res.json();
-        if (!cancelled) {
-          useBoardStore.getState().loadObjects(data);
-        }
-      } catch (err) {
-        console.error("Failed to load board objects:", err);
-      }
-    }
-
-    fetchObjects();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [boardId, user]);
 
   // DB write helpers (fire-and-forget)
   const persistCreate = useCallback(
@@ -66,10 +48,86 @@ export function useBoardSync(boardId: string | undefined) {
         });
       } catch (err) {
         console.error("Failed to persist create:", err);
+        if (boardId) addPendingWrite(boardId, { type: "create", object: obj });
       }
     },
     [boardId, user]
   );
+
+  // Fetch objects on mount and on reconnect
+  useEffect(() => {
+    if (!boardId || !user) return;
+
+    let cancelled = false;
+
+    async function flushPendingWrites(headers: Record<string, string>) {
+      const pending = getPendingWrites(boardId!);
+      if (pending.length === 0) return;
+
+      for (const write of pending) {
+        try {
+          if (write.type === "create") {
+            await fetch(`/api/boards/${boardId}/objects`, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(write.object),
+            });
+            // Add to store so it appears after a fresh page load
+            useBoardStore.getState().applyRemoteCreate(write.object);
+          } else if (write.type === "update") {
+            await fetch(`/api/boards/${boardId}/objects/${write.objectId}`, {
+              method: "PATCH",
+              headers,
+              body: JSON.stringify(write.changes),
+            });
+          } else if (write.type === "delete") {
+            await fetch(`/api/boards/${boardId}/objects/${write.objectId}`, {
+              method: "DELETE",
+              headers,
+            });
+          }
+        } catch (err) {
+          console.error("Failed to flush pending write:", err);
+          // If flush fails, keep the queue and bail out
+          return;
+        }
+      }
+      clearPendingWrites(boardId!);
+    }
+
+    async function fetchObjects() {
+      try {
+        const headers = await getAuthHeaders(user!);
+        const res = await fetch(`/api/boards/${boardId}/objects`, { headers });
+        if (!res.ok) return;
+        const data: BoardObject[] = await res.json();
+        if (cancelled) return;
+
+        if (reconnectKey > 0) {
+          // Reconnection: reconcile remote with local state
+          const localOnly = useBoardStore.getState().reconcileObjects(data);
+          // Persist any objects created while offline
+          for (const obj of localOnly) {
+            persistCreate(obj);
+          }
+        } else {
+          // Initial load
+          useBoardStore.getState().loadObjects(data);
+        }
+
+        // Flush any pending writes from a previous offline session
+        await flushPendingWrites(await getAuthHeaders(user!));
+      } catch (err) {
+        console.error("Failed to load board objects:", err);
+      }
+    }
+
+    fetchObjects();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId, user, reconnectKey, persistCreate]);
 
   const persistUpdate = useCallback(
     async (objectId: string, changes: Partial<BoardObject>) => {
@@ -83,6 +141,8 @@ export function useBoardSync(boardId: string | undefined) {
         });
       } catch (err) {
         console.error("Failed to persist update:", err);
+        if (boardId)
+          addPendingWrite(boardId, { type: "update", objectId, changes });
       }
     },
     [boardId, user]
@@ -99,6 +159,8 @@ export function useBoardSync(boardId: string | undefined) {
         });
       } catch (err) {
         console.error("Failed to persist delete:", err);
+        if (boardId)
+          addPendingWrite(boardId, { type: "delete", objectId });
       }
     },
     [boardId, user]
@@ -151,12 +213,18 @@ export function useBoardSync(boardId: string | undefined) {
     );
 
     // Subscribe AFTER registering listeners
+    const channelName = `board:${boardId}:objects`;
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
-      } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+      } else if (
+        status === "CLOSED" ||
+        status === "CHANNEL_ERROR" ||
+        status === "TIMED_OUT"
+      ) {
         connectedRef.current = false;
       }
+      onChannelStatus?.(channelName, status);
     });
 
     return () => {
@@ -164,7 +232,7 @@ export function useBoardSync(boardId: string | undefined) {
       channelRef.current = null;
       channel.unsubscribe();
     };
-  }, [boardId, user]);
+  }, [boardId, user, reconnectKey, onChannelStatus]);
 
   // Cleanup debounce timers on unmount
   useEffect(() => {

@@ -31,6 +31,7 @@ interface BoardStore {
 
   // Persistence
   loadObjects: (objects: BoardObject[]) => void;
+  reconcileObjects: (remoteObjects: BoardObject[]) => BoardObject[];
 
   // Selection
   selectedIds: string[];
@@ -120,6 +121,35 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       map[obj.id] = obj;
     }
     set({ objects: map, selectedIds: [] });
+  },
+
+  reconcileObjects: (remoteObjects) => {
+    const local = get().objects;
+    const remoteMap: Record<string, BoardObject> = {};
+    for (const obj of remoteObjects) {
+      remoteMap[obj.id] = obj;
+    }
+
+    // Merge: remote wins by default, but local wins if updatedAt is newer
+    const merged: Record<string, BoardObject> = { ...remoteMap };
+    for (const [id, localObj] of Object.entries(local)) {
+      const remoteObj = remoteMap[id];
+      if (remoteObj) {
+        // Both exist: newer updatedAt wins
+        if (localObj.updatedAt > remoteObj.updatedAt) {
+          merged[id] = localObj;
+        }
+      } else {
+        // Local-only: preserve (created offline)
+        merged[id] = localObj;
+      }
+    }
+
+    // Collect local-only objects to persist
+    const localOnly = Object.values(local).filter((obj) => !remoteMap[obj.id]);
+
+    set({ objects: merged });
+    return localOnly;
   },
 
   selectedIds: [],
