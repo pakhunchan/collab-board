@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-
-type Tool = "select" | "pan" | "sticky" | "rectangle";
+import { useBoardStore, Tool } from "@/stores/boardStore";
 
 const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "select", label: "Select", icon: "↖" },
@@ -13,7 +11,8 @@ const tools: { id: Tool; label: string; icon: string }[] = [
 ];
 
 export default function Toolbar({ boardId }: { boardId: string }) {
-  const [activeTool, setActiveTool] = useState<Tool>("select");
+  const activeTool = useBoardStore((s) => s.activeTool);
+  const setActiveTool = useBoardStore((s) => s.setActiveTool);
   const { signOut } = useAuth();
 
   return (

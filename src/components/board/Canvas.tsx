@@ -1,8 +1,11 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Circle } from "react-konva";
+import { Stage, Layer, Circle, Transformer } from "react-konva";
 import Konva from "konva";
+import { useBoardStore } from "@/stores/boardStore";
+import StickyNote from "./StickyNote";
+import RectShape from "./RectShape";
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
@@ -25,13 +28,11 @@ function DotGrid({
 
   const spacing = DOT_SPACING;
 
-  // Calculate visible area in world coordinates
   const startX = -stagePos.x / scale;
   const startY = -stagePos.y / scale;
   const endX = startX + width / scale;
   const endY = startY + height / scale;
 
-  // Snap to grid
   const gridStartX = Math.floor(startX / spacing) * spacing;
   const gridStartY = Math.floor(startY / spacing) * spacing;
 
@@ -60,12 +61,30 @@ function DotGrid({
 
 export default function Canvas() {
   const stageRef = useRef<Konva.Stage>(null);
+  const transformerRef = useRef<Konva.Transformer>(null);
   const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const spaceHeld = useRef(false);
+  const isDraggingObject = useRef(false);
 
+  // Inline text editing state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [textareaPos, setTextareaPos] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const activeTool = useBoardStore((s) => s.activeTool);
+  const setActiveTool = useBoardStore((s) => s.setActiveTool);
+  const objects = useBoardStore((s) => s.objects);
+  const addObject = useBoardStore((s) => s.addObject);
+  const updateObject = useBoardStore((s) => s.updateObject);
+  const deleteObject = useBoardStore((s) => s.deleteObject);
+  const selectedIds = useBoardStore((s) => s.selectedIds);
+  const setSelectedIds = useBoardStore((s) => s.setSelectedIds);
+  const clearSelection = useBoardStore((s) => s.clearSelection);
+
+  // Resize observer
   useEffect(() => {
     const updateSize = () => {
       const container = stageRef.current?.container()?.parentElement;
@@ -81,12 +100,23 @@ export default function Canvas() {
     return () => window.removeEventListener("resize", updateSize);
   }, []);
 
+  // Keyboard: space for pan, delete for removing objects
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore when editing text
+      if (editingId) return;
+
       if (e.code === "Space" && !e.repeat) {
         e.preventDefault();
         spaceHeld.current = true;
         setIsPanning(true);
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        // Don't delete if an input/textarea is focused
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        const ids = useBoardStore.getState().selectedIds;
+        ids.forEach((id) => deleteObject(id));
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -101,7 +131,20 @@ export default function Canvas() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [editingId, deleteObject]);
+
+  // Attach transformer to selected nodes
+  useEffect(() => {
+    const tr = transformerRef.current;
+    const stage = stageRef.current;
+    if (!tr || !stage) return;
+
+    const nodes = selectedIds
+      .map((id) => stage.findOne("#" + id))
+      .filter(Boolean) as Konva.Node[];
+    tr.nodes(nodes);
+    tr.getLayer()?.batchDraw();
+  }, [selectedIds, objects]);
 
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -142,7 +185,6 @@ export default function Canvas() {
 
   const handleMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Middle mouse button
       if (e.evt.button === 1) {
         setIsPanning(true);
       }
@@ -159,14 +201,104 @@ export default function Canvas() {
     []
   );
 
+  // Click on stage: create objects or clear selection
+  const handleStageClick = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      // Only handle left clicks
+      if (e.evt.button !== 0) return;
+
+      // If we just finished dragging an object, don't create/deselect
+      if (isDraggingObject.current) {
+        isDraggingObject.current = false;
+        return;
+      }
+
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+
+      // Convert to world coordinates
+      const worldX = (pointer.x - stagePos.x) / scale;
+      const worldY = (pointer.y - stagePos.y) / scale;
+
+      const tool = useBoardStore.getState().activeTool;
+
+      if (tool === "sticky" || tool === "rectangle") {
+        // Clicked on empty area → create object
+        if (e.target === stage) {
+          const obj = addObject(tool, worldX, worldY);
+          setSelectedIds([obj.id]);
+          setActiveTool("select");
+        }
+        return;
+      }
+
+      if (tool === "select") {
+        // Clicked on empty canvas → deselect
+        if (e.target === stage) {
+          clearSelection();
+        }
+      }
+    },
+    [stagePos, scale, addObject, setSelectedIds, setActiveTool, clearSelection]
+  );
+
+  // Handle double-click on sticky note for inline text editing
+  const handleStickyDblClick = useCallback(
+    (objId: string) => {
+      const obj = useBoardStore.getState().objects[objId];
+      if (!obj) return;
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // Calculate screen position of the object
+      const screenX = obj.x * scale + stagePos.x;
+      const screenY = obj.y * scale + stagePos.y;
+      const screenW = obj.width * scale;
+      const screenH = obj.height * scale;
+
+      setEditingId(objId);
+      setTextareaPos({ x: screenX, y: screenY, width: screenW, height: screenH });
+
+      // Focus textarea after render
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    },
+    [scale, stagePos]
+  );
+
+  const handleTextareaBlur = useCallback(() => {
+    if (!editingId || !textareaRef.current) return;
+    updateObject(editingId, { text: textareaRef.current.value });
+    setEditingId(null);
+  }, [editingId, updateObject]);
+
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Escape") {
+        handleTextareaBlur();
+      }
+    },
+    [handleTextareaBlur]
+  );
+
+  const sortedObjects = Object.values(objects).sort((a, b) => a.zIndex - b.zIndex);
+
+  const cursorForTool = () => {
+    if (isPanning) return "grab";
+    if (activeTool === "sticky" || activeTool === "rectangle") return "crosshair";
+    return "default";
+  };
+
   return (
     <div
       style={{
         width: "100%",
         height: "100%",
         overflow: "hidden",
-        cursor: isPanning ? "grab" : "default",
+        cursor: cursorForTool(),
         background: "#f8f8f8",
+        position: "relative",
       }}
     >
       <Stage
@@ -177,11 +309,12 @@ export default function Canvas() {
         scaleY={scale}
         x={stagePos.x}
         y={stagePos.y}
-        draggable={isPanning}
+        draggable={isPanning || activeTool === "pan"}
         onWheel={handleWheel}
         onDragEnd={handleDragEnd}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
+        onClick={handleStageClick}
       >
         <Layer listening={false}>
           <DotGrid
@@ -191,8 +324,66 @@ export default function Canvas() {
             height={dimensions.height}
           />
         </Layer>
-        <Layer>{/* Content layer — shapes, sticky notes, etc. */}</Layer>
+        <Layer>
+          {sortedObjects.map((obj) =>
+            obj.type === "sticky" ? (
+              <StickyNote
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={() => setSelectedIds([obj.id])}
+                onChange={(changes) => updateObject(obj.id, changes)}
+                onDblClick={() => handleStickyDblClick(obj.id)}
+              />
+            ) : (
+              <RectShape
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={() => setSelectedIds([obj.id])}
+                onChange={(changes) => updateObject(obj.id, changes)}
+              />
+            )
+          )}
+          <Transformer
+            ref={transformerRef}
+            rotateEnabled={true}
+            boundBoxFunc={(_oldBox, newBox) => {
+              if (newBox.width < 30 || newBox.height < 30) return _oldBox;
+              return newBox;
+            }}
+          />
+        </Layer>
       </Stage>
+
+      {/* Inline text editing overlay */}
+      {editingId && (
+        <textarea
+          ref={textareaRef}
+          defaultValue={objects[editingId]?.text || ""}
+          onBlur={handleTextareaBlur}
+          onKeyDown={handleTextareaKeyDown}
+          style={{
+            position: "absolute",
+            top: textareaPos.y,
+            left: textareaPos.x,
+            width: textareaPos.width,
+            height: textareaPos.height,
+            padding: `${12 * scale}px`,
+            fontSize: `${16 * scale}px`,
+            fontFamily: "sans-serif",
+            color: "#333",
+            background: "transparent",
+            border: "2px solid #1a73e8",
+            borderRadius: `${4 * scale}px`,
+            outline: "none",
+            resize: "none",
+            overflow: "hidden",
+            zIndex: 10,
+            boxSizing: "border-box",
+          }}
+        />
+      )}
     </div>
   );
 }

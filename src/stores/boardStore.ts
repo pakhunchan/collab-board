@@ -1,0 +1,87 @@
+import { create } from "zustand";
+import { BoardObject, BoardObjectType } from "@/types/board";
+
+export type Tool = "select" | "pan" | "sticky" | "rectangle";
+
+const DEFAULT_COLORS: Record<BoardObjectType, string> = {
+  sticky: "#FFEB3B",
+  rectangle: "#90CAF9",
+};
+
+const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> = {
+  sticky: { width: 200, height: 200 },
+  rectangle: { width: 240, height: 160 },
+};
+
+interface BoardStore {
+  // Tool state
+  activeTool: Tool;
+  setActiveTool: (tool: Tool) => void;
+
+  // Objects
+  objects: Record<string, BoardObject>;
+  addObject: (type: BoardObjectType, x: number, y: number) => BoardObject;
+  updateObject: (id: string, changes: Partial<BoardObject>) => void;
+  deleteObject: (id: string) => void;
+
+  // Selection
+  selectedIds: string[];
+  setSelectedIds: (ids: string[]) => void;
+  clearSelection: () => void;
+}
+
+export const useBoardStore = create<BoardStore>((set, get) => ({
+  activeTool: "select",
+  setActiveTool: (tool) => set({ activeTool: tool }),
+
+  objects: {},
+  addObject: (type, x, y) => {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const size = DEFAULT_SIZES[type];
+    const obj: BoardObject = {
+      id,
+      boardId: "",
+      type,
+      x: x - size.width / 2,
+      y: y - size.height / 2,
+      width: size.width,
+      height: size.height,
+      rotation: 0,
+      color: DEFAULT_COLORS[type],
+      zIndex: Object.keys(get().objects).length,
+      properties: {},
+      createdBy: "",
+      updatedAt: now,
+      createdAt: now,
+    };
+    set((state) => ({
+      objects: { ...state.objects, [id]: obj },
+    }));
+    return obj;
+  },
+  updateObject: (id, changes) =>
+    set((state) => {
+      const existing = state.objects[id];
+      if (!existing) return state;
+      return {
+        objects: {
+          ...state.objects,
+          [id]: { ...existing, ...changes, updatedAt: new Date().toISOString() },
+        },
+      };
+    }),
+  deleteObject: (id) =>
+    set((state) => {
+      const next = { ...state.objects };
+      delete next[id];
+      return {
+        objects: next,
+        selectedIds: state.selectedIds.filter((sid) => sid !== id),
+      };
+    }),
+
+  selectedIds: [],
+  setSelectedIds: (ids) => set({ selectedIds: ids }),
+  clearSelection: () => set({ selectedIds: [] }),
+}));
