@@ -24,6 +24,11 @@ interface BoardStore {
   updateObject: (id: string, changes: Partial<BoardObject>) => void;
   deleteObject: (id: string) => void;
 
+  // Remote-apply (no re-broadcast)
+  applyRemoteCreate: (obj: BoardObject) => void;
+  applyRemoteUpdate: (id: string, changes: Partial<BoardObject>) => void;
+  applyRemoteDelete: (id: string) => void;
+
   // Selection
   selectedIds: string[];
   setSelectedIds: (ids: string[]) => void;
@@ -72,6 +77,31 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       };
     }),
   deleteObject: (id) =>
+    set((state) => {
+      const next = { ...state.objects };
+      delete next[id];
+      return {
+        objects: next,
+        selectedIds: state.selectedIds.filter((sid) => sid !== id),
+      };
+    }),
+
+  applyRemoteCreate: (obj) =>
+    set((state) => ({
+      objects: { ...state.objects, [obj.id]: obj },
+    })),
+  applyRemoteUpdate: (id, changes) =>
+    set((state) => {
+      const existing = state.objects[id];
+      if (!existing) return state;
+      return {
+        objects: {
+          ...state.objects,
+          [id]: { ...existing, ...changes },
+        },
+      };
+    }),
+  applyRemoteDelete: (id) =>
     set((state) => {
       const next = { ...state.objects };
       delete next[id];

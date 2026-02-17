@@ -6,6 +6,7 @@ import { Stage, Layer, Circle, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
 import { useCursors } from "@/hooks/useCursors";
+import { useBoardSync } from "@/hooks/useBoardSync";
 import StickyNote from "./StickyNote";
 import RectShape from "./RectShape";
 import Cursors from "./Cursors";
@@ -78,6 +79,9 @@ export default function Canvas() {
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId);
 
+  // Real-time object sync
+  const { broadcastCreate, broadcastUpdate, broadcastDelete } = useBoardSync(boardId);
+
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [textareaPos, setTextareaPos] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -86,9 +90,6 @@ export default function Canvas() {
   const activeTool = useBoardStore((s) => s.activeTool);
   const setActiveTool = useBoardStore((s) => s.setActiveTool);
   const objects = useBoardStore((s) => s.objects);
-  const addObject = useBoardStore((s) => s.addObject);
-  const updateObject = useBoardStore((s) => s.updateObject);
-  const deleteObject = useBoardStore((s) => s.deleteObject);
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const setSelectedIds = useBoardStore((s) => s.setSelectedIds);
   const clearSelection = useBoardStore((s) => s.clearSelection);
@@ -125,7 +126,7 @@ export default function Canvas() {
         const tag = (e.target as HTMLElement).tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
         const ids = useBoardStore.getState().selectedIds;
-        ids.forEach((id) => deleteObject(id));
+        ids.forEach((id) => broadcastDelete(id));
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -140,7 +141,7 @@ export default function Canvas() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [editingId, deleteObject]);
+  }, [editingId, broadcastDelete]);
 
   // Attach transformer to selected nodes
   useEffect(() => {
@@ -236,7 +237,7 @@ export default function Canvas() {
       if (tool === "sticky" || tool === "rectangle") {
         // Clicked on empty area → create object
         if (e.target === stage) {
-          const obj = addObject(tool, worldX, worldY);
+          const obj = broadcastCreate(tool, worldX, worldY);
           setSelectedIds([obj.id]);
           setActiveTool("select");
         }
@@ -250,7 +251,7 @@ export default function Canvas() {
         }
       }
     },
-    [stagePos, scale, addObject, setSelectedIds, setActiveTool, clearSelection]
+    [stagePos, scale, broadcastCreate, setSelectedIds, setActiveTool, clearSelection]
   );
 
   // Handle double-click on sticky note for inline text editing
@@ -278,9 +279,9 @@ export default function Canvas() {
 
   const handleTextareaBlur = useCallback(() => {
     if (!editingId || !textareaRef.current) return;
-    updateObject(editingId, { text: textareaRef.current.value });
+    broadcastUpdate(editingId, { text: textareaRef.current.value });
     setEditingId(null);
-  }, [editingId, updateObject]);
+  }, [editingId, broadcastUpdate]);
 
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -352,7 +353,7 @@ export default function Canvas() {
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
                 onSelect={() => setSelectedIds([obj.id])}
-                onChange={(changes) => updateObject(obj.id, changes)}
+                onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
               />
             ) : (
@@ -361,7 +362,7 @@ export default function Canvas() {
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
                 onSelect={() => setSelectedIds([obj.id])}
-                onChange={(changes) => updateObject(obj.id, changes)}
+                onChange={(changes) => broadcastUpdate(obj.id, changes)}
               />
             )
           )}
