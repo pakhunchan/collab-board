@@ -6,12 +6,22 @@ export interface Board {
   updatedAt: number;
 }
 
-export interface BoardCard {
+export type BoardObjectType = "sticky" | "rectangle";
+
+export interface BoardObject {
   id: string;
   boardId: string;
-  content: string;
-  authorId: string;
-  position: { x: number; y: number };
-  createdAt: number;
-  updatedAt: number;
+  type: BoardObjectType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  text?: string;
+  color: string;
+  zIndex: number;
+  properties: Record<string, unknown>;
+  createdBy: string;
+  updatedAt: string;
+  createdAt: string;
 }
