@@ -23,6 +23,8 @@ export function useBoardSync(boardId: string | undefined) {
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
+  const lastLiveMoveRef = useRef<number>(0);
+  const liveMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch objects on mount
   useEffect(() => {
@@ -271,5 +273,38 @@ export function useBoardSync(boardId: string | undefined) {
     [user, persistDelete]
   );
 
-  return { broadcastCreate, broadcastUpdate, broadcastDelete };
+  // Outgoing: broadcastLiveMove (throttled, broadcast-only — no store update, no DB write)
+  const broadcastLiveMove = useCallback(
+    (id: string, x: number, y: number) => {
+      if (!channelRef.current || !connectedRef.current) return;
+
+      const send = () => {
+        lastLiveMoveRef.current = Date.now();
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "object:update",
+          payload: {
+            senderId: user?.uid || "",
+            objectId: id,
+            changes: { x, y },
+          },
+        });
+      };
+
+      const elapsed = Date.now() - lastLiveMoveRef.current;
+      if (elapsed >= 50) {
+        if (liveMoveTimerRef.current) {
+          clearTimeout(liveMoveTimerRef.current);
+          liveMoveTimerRef.current = null;
+        }
+        send();
+      } else {
+        if (liveMoveTimerRef.current) clearTimeout(liveMoveTimerRef.current);
+        liveMoveTimerRef.current = setTimeout(send, 50 - elapsed);
+      }
+    },
+    [user]
+  );
+
+  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove };
 }

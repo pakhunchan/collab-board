@@ -80,7 +80,7 @@ export default function Canvas() {
   const { remoteCursors, handleCursorMove } = useCursors(boardId);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete } = useBoardSync(boardId);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove } = useBoardSync(boardId);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -93,6 +93,30 @@ export default function Canvas() {
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const setSelectedIds = useBoardStore((s) => s.setSelectedIds);
   const clearSelection = useBoardStore((s) => s.clearSelection);
+
+  // Keep a stable ref to broadcastLiveMove so the native listener always calls the latest version
+  const broadcastLiveMoveRef = useRef(broadcastLiveMove);
+  broadcastLiveMoveRef.current = broadcastLiveMove;
+
+  // Native Konva dragmove listener for live position sync
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const handler = (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      if (node === stage) return;
+      const id = node.id();
+      if (id) {
+        broadcastLiveMoveRef.current(id, node.x(), node.y());
+      }
+    };
+
+    stage.on("dragmove", handler);
+    return () => {
+      stage.off("dragmove", handler);
+    };
+  }, []);
 
   // Resize observer
   useEffect(() => {
