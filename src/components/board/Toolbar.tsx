@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useBoardStore, Tool } from "@/stores/boardStore";
 import PresenceBar from "@/components/board/PresenceBar";
 import ConnectionStatusIndicator from "@/components/board/ConnectionStatus";
+import SharePanel from "@/components/board/SharePanel";
 import type { ConnectionStatus } from "@/hooks/useConnectionManager";
 
 const tools: { id: Tool; label: string; icon: string }[] = [
@@ -24,6 +26,7 @@ export default function Toolbar({
   const activeTool = useBoardStore((s) => s.activeTool);
   const setActiveTool = useBoardStore((s) => s.setActiveTool);
   const { signOut } = useAuth();
+  const [showShare, setShowShare] = useState(false);
 
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shrink-0">
@@ -57,12 +60,21 @@ export default function Toolbar({
         <PresenceBar />
         <span className="text-xs text-gray-400 font-mono">{boardId}</span>
         <button
+          onClick={() => setShowShare(true)}
+          className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-white border border-blue-300 rounded-md hover:bg-blue-50"
+        >
+          Share
+        </button>
+        <button
           onClick={signOut}
           className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
         >
           Sign Out
         </button>
       </div>
+      {showShare && (
+        <SharePanel boardId={boardId} onClose={() => setShowShare(false)} />
+      )}
     </div>
   );
 }

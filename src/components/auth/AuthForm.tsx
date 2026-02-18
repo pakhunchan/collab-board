@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 
@@ -15,7 +15,13 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { signIn, signUp, signInWithGoogle } = useAuth();
+
+  const getRedirect = () => {
+    const invite = searchParams.get("invite");
+    return invite ? `/invite/${invite}` : "/boards";
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +34,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
       } else {
         await signUp(email, password);
       }
-      router.push("/boards");
+      router.push(getRedirect());
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -42,7 +48,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
     try {
       await signInWithGoogle();
-      router.push("/boards");
+      router.push(getRedirect());
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -130,14 +136,14 @@ export default function AuthForm({ mode }: AuthFormProps) {
           {mode === "login" ? (
             <>
               Don&apos;t have an account?{" "}
-              <Link href="/auth/signup" className="text-blue-600 hover:text-blue-500 font-medium">
+              <Link href={`/auth/signup${searchParams.get("invite") ? `?invite=${searchParams.get("invite")}` : ""}`} className="text-blue-600 hover:text-blue-500 font-medium">
                 Sign up
               </Link>
             </>
           ) : (
             <>
               Already have an account?{" "}
-              <Link href="/auth/login" className="text-blue-600 hover:text-blue-500 font-medium">
+              <Link href={`/auth/login${searchParams.get("invite") ? `?invite=${searchParams.get("invite")}` : ""}`} className="text-blue-600 hover:text-blue-500 font-medium">
                 Sign in
               </Link>
             </>
