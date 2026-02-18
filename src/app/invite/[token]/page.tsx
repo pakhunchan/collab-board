@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { boardPath } from "@/lib/routes";
 
 export default function InvitePage() {
   const { user, loading } = useAuth();
@@ -34,7 +35,7 @@ export default function InvitePage() {
           setError(data.error || "Failed to accept invite");
           return;
         }
-        router.push(`/board/${data.boardId}`);
+        router.push(boardPath(data.boardId));
       } catch {
         setError("Failed to accept invite");
       }

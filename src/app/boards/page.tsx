@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { boardPath } from "@/lib/routes";
 
 interface BoardListItem {
   id: string;
@@ -84,7 +85,7 @@ export default function BoardsPage() {
       });
       if (!res.ok) throw new Error("Failed to create board");
       const board = await res.json();
-      router.push(`/board/${board.id}`);
+      router.push(boardPath(board.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create board");
       setCreating(false);
@@ -221,7 +222,7 @@ export default function BoardsPage() {
             {boards.map((board) => (
               <div
                 key={board.id}
-                onClick={() => router.push(`/board/${board.id}`)}
+                onClick={() => router.push(boardPath(board.id))}
                 className="bg-white rounded-lg border border-gray-200 p-4 text-left hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
               >
                 <div className="flex items-start justify-between mb-2">
