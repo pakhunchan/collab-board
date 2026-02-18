@@ -104,6 +104,10 @@ vi.mock("@/lib/supabase/server", () => ({
   getSupabaseServerClient: () => mockSupabase.client,
 }));
 
+vi.mock("@/lib/supabase/broadcast", () => ({
+  broadcastBoardEvent: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/auth-helpers", () => ({
   verifyFirebaseToken: vi.fn(async () => {
     if (shouldRejectAuth) throw new Error("Unauthorized");
