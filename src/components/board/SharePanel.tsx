@@ -26,11 +26,13 @@ export default function SharePanel({
 }) {
   const { user } = useAuth();
   const [isOwner, setIsOwner] = useState(false);
+  const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [invites, setInvites] = useState<Invite[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [expiresIn, setExpiresIn] = useState<"3h" | "1d" | "3d">("1d");
   const [generating, setGenerating] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [copiedBoardLink, setCopiedBoardLink] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const getToken = useCallback(async () => {
@@ -43,6 +45,13 @@ export default function SharePanel({
     if (!token) return;
 
     const headers = { Authorization: `Bearer ${token}` };
+
+    // Fetch board to get visibility
+    const boardRes = await fetch(`/api/boards/${boardId}`, { headers });
+    if (boardRes.ok) {
+      const boardData = await boardRes.json();
+      setVisibility(boardData.visibility);
+    }
 
     // Fetch members (any board member can do this)
     const membersRes = await fetch(`/api/boards/${boardId}/members`, {
@@ -124,6 +133,13 @@ export default function SharePanel({
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
+  const copyBoardLink = async () => {
+    const url = `${window.location.origin}/board/${boardId}`;
+    await navigator.clipboard.writeText(url);
+    setCopiedBoardLink(true);
+    setTimeout(() => setCopiedBoardLink(false), 2000);
+  };
+
   const formatExpiry = (dateStr: string) => {
     const diff = new Date(dateStr).getTime() - Date.now();
     if (diff <= 0) return "Expired";
@@ -152,8 +168,34 @@ export default function SharePanel({
           </div>
         ) : (
           <div className="max-h-[70vh] overflow-y-auto">
-            {/* Invite section — owner only */}
-            {isOwner && (
+            {/* Public board: simple copy link */}
+            {visibility === "public" && (
+              <div className="px-5 py-4 border-b border-gray-200">
+                <h3 className="text-sm font-medium text-gray-700 mb-3">
+                  Board Link
+                </h3>
+                <p className="text-xs text-gray-500 mb-3">
+                  This board is public. Anyone with the link can access it.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${window.location.origin}/board/${boardId}`}
+                    className="flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 bg-gray-50 truncate"
+                  />
+                  <button
+                    onClick={copyBoardLink}
+                    className="shrink-0 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
+                  >
+                    {copiedBoardLink ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Private board: invite link section — owner only */}
+            {visibility === "private" && isOwner && (
               <div className="px-5 py-4 border-b border-gray-200">
                 <h3 className="text-sm font-medium text-gray-700 mb-3">
                   Invite Link
