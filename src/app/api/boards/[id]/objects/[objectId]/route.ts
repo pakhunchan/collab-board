@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { verifyFirebaseToken } from "@/lib/auth-helpers";
+import { verifyFirebaseToken, assertBoardAccess } from "@/lib/auth-helpers";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { partialBoardObjectToRow } from "@/lib/board-object-mapper";
 
@@ -7,10 +7,17 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string; objectId: string } }
 ) {
+  let decoded;
   try {
-    await verifyFirebaseToken(request);
+    decoded = await verifyFirebaseToken(request);
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await assertBoardAccess(decoded.uid, params.id);
+  } catch {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await request.json();
@@ -42,10 +49,17 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string; objectId: string } }
 ) {
+  let decoded;
   try {
-    await verifyFirebaseToken(request);
+    decoded = await verifyFirebaseToken(request);
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await assertBoardAccess(decoded.uid, params.id);
+  } catch {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const supabase = getSupabaseServerClient();
