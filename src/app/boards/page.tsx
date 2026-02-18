@@ -26,6 +26,26 @@ export default function BoardsPage() {
   const [newVisibility, setNewVisibility] = useState<"public" | "private">("public");
   const [creating, setCreating] = useState(false);
 
+  const handleDelete = async (boardId: string, boardName: string) => {
+    if (!user) return;
+    if (!confirm(`Delete "${boardName}"? This cannot be undone.`)) return;
+
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/boards/${boardId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to delete board");
+      }
+      setBoards((prev) => prev.filter((b) => b.id !== boardId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete board");
+    }
+  };
+
   const fetchBoards = useCallback(async () => {
     if (!user) return;
     try {
@@ -199,10 +219,10 @@ export default function BoardsPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {boards.map((board) => (
-              <button
+              <div
                 key={board.id}
                 onClick={() => router.push(`/board/${board.id}`)}
-                className="bg-white rounded-lg border border-gray-200 p-4 text-left hover:border-blue-300 hover:shadow-md transition-all"
+                className="bg-white rounded-lg border border-gray-200 p-4 text-left hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
               >
                 <div className="flex items-start justify-between mb-2">
                   <h3 className="font-medium text-gray-900 truncate pr-2">{board.name}</h3>
@@ -216,15 +236,29 @@ export default function BoardsPage() {
                     {board.visibility}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  {board.role && (
-                    <span className="capitalize">{board.role}</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    {board.role && (
+                      <span className="capitalize">{board.role}</span>
+                    )}
+                    <span>
+                      {new Date(board.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  {board.role === "owner" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(board.id, board.name);
+                      }}
+                      className="text-xs text-gray-400 hover:text-red-600 transition-colors"
+                      title="Delete board"
+                    >
+                      Delete
+                    </button>
                   )}
-                  <span>
-                    {new Date(board.created_at).toLocaleDateString()}
-                  </span>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}

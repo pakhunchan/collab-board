@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useBoardStore, Tool } from "@/stores/boardStore";
 import PresenceBar from "@/components/board/PresenceBar";
@@ -27,6 +28,14 @@ export default function Toolbar({
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shrink-0">
       <div className="flex items-center gap-1">
+        <Link
+          href="/boards"
+          className="w-9 h-9 flex items-center justify-center rounded-md text-sm text-gray-600 hover:bg-gray-100 transition-colors"
+          title="Back to boards"
+        >
+          ←
+        </Link>
+        <div className="w-px h-5 bg-gray-200 mx-1" />
         {tools.map((tool) => (
           <button
             key={tool.id}
