@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyFirebaseToken } from "@/lib/auth-helpers";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { broadcastBoardEvent } from "@/lib/supabase/broadcast";
 
 export async function DELETE(
   request: Request,
@@ -47,6 +48,9 @@ export async function DELETE(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // Fire-and-forget: notify the removed user's client immediately
+  broadcastBoardEvent(params.id, "access:revoked", { userId: params.userId });
 
   return NextResponse.json({ ok: true });
 }

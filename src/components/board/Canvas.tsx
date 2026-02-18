@@ -66,12 +66,14 @@ interface CanvasProps {
   boardId: string;
   reconnectKey?: number;
   onChannelStatus?: (channelId: string, status: string) => void;
+  onAccessRevoked?: () => void;
 }
 
 export default function Canvas({
   boardId,
   reconnectKey = 0,
   onChannelStatus,
+  onAccessRevoked,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -86,7 +88,7 @@ export default function Canvas({
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove } = useBoardSync(boardId, reconnectKey, onChannelStatus);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);

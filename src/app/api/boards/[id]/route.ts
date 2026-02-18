@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyFirebaseToken, assertBoardAccess } from "@/lib/auth-helpers";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { broadcastBoardEvent } from "@/lib/supabase/broadcast";
 
 export async function GET(
   request: Request,
@@ -61,6 +62,9 @@ export async function DELETE(
   if (board.created_by !== decoded.uid) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Broadcast before deleting so channel still exists for connected users
+  broadcastBoardEvent(params.id, "board:deleted", {});
 
   const { error } = await supabase
     .from("boards")

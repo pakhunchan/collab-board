@@ -24,7 +24,8 @@ async function getAuthHeaders(user: User) {
 export function useBoardSync(
   boardId: string | undefined,
   reconnectKey = 0,
-  onChannelStatus?: (channelId: string, status: string) => void
+  onChannelStatus?: (channelId: string, status: string) => void,
+  onAccessRevoked?: () => void
 ) {
   const { user } = useAuth();
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -248,6 +249,26 @@ export function useBoardSync(
       }
     );
 
+    // Incoming: access:revoked — server evicts a specific user
+    channel.on(
+      "broadcast",
+      { event: "access:revoked" },
+      (payload: { payload: { userId: string } }) => {
+        if (payload.payload.userId === user.uid) {
+          onAccessRevoked?.();
+        }
+      }
+    );
+
+    // Incoming: board:deleted — board was deleted, evict everyone
+    channel.on(
+      "broadcast",
+      { event: "board:deleted" },
+      () => {
+        onAccessRevoked?.();
+      }
+    );
+
     // Subscribe AFTER registering listeners
     const channelName = `board:${boardId}:objects`;
     channel.subscribe((status) => {
@@ -269,7 +290,7 @@ export function useBoardSync(
       channelRef.current = null;
       channel.unsubscribe();
     };
-  }, [boardId, user, reconnectKey, onChannelStatus, drainPendingBroadcasts]);
+  }, [boardId, user, reconnectKey, onChannelStatus, onAccessRevoked, drainPendingBroadcasts]);
 
   // Cleanup debounce timers on unmount
   useEffect(() => {
