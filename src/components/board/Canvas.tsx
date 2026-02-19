@@ -153,6 +153,12 @@ export default function Canvas({
   const selectionBoxRef = useRef(false);
   const clipboard = useRef<BoardObject[]>([]);
   const lastWorldPos = useRef({ x: 0, y: 0 });
+  const multiDragStart = useRef<{
+    startX: number;
+    startY: number;
+    positions: Record<string, { x: number; y: number }>;
+    moved: boolean;
+  } | null>(null);
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -541,6 +547,49 @@ export default function Canvas({
           if (!pointer) return;
           const worldX = (pointer.x - stagePos.x) / scale;
           const worldY = (pointer.y - stagePos.y) / scale;
+
+          // If multi-selected, check if click is within the AABB of selected objects
+          const currentSelected = useBoardStore.getState().selectedIds;
+          if (currentSelected.length > 1) {
+            const objs = useBoardStore.getState().objects;
+            const padding = 10;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const id of currentSelected) {
+              const o = objs[id];
+              if (!o) continue;
+              minX = Math.min(minX, o.x);
+              minY = Math.min(minY, o.y);
+              maxX = Math.max(maxX, o.x + o.width);
+              maxY = Math.max(maxY, o.y + o.height);
+            }
+            if (
+              worldX >= minX - padding && worldX <= maxX + padding &&
+              worldY >= minY - padding && worldY <= maxY + padding
+            ) {
+              // Collect initial positions for all selected objects + frame children
+              const positions: Record<string, { x: number; y: number }> = {};
+              for (const id of currentSelected) {
+                const o = objs[id];
+                if (o) positions[id] = { x: o.x, y: o.y };
+              }
+              // Include frame children not already selected
+              for (const id of currentSelected) {
+                const o = objs[id];
+                if (o?.type === "frame") {
+                  const children = getChildIds(id, objs);
+                  for (const childId of children) {
+                    if (!positions[childId]) {
+                      const child = objs[childId];
+                      if (child) positions[childId] = { x: child.x, y: child.y };
+                    }
+                  }
+                }
+              }
+              multiDragStart.current = { startX: worldX, startY: worldY, positions, moved: false };
+              return;
+            }
+          }
+
           setSelectionBox({ startX: worldX, startY: worldY, endX: worldX, endY: worldY });
           selectionBoxRef.current = false;
         }
@@ -553,6 +602,61 @@ export default function Canvas({
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (e.evt.button === 1 && !spaceHeld.current) {
         setIsPanning(false);
+      }
+
+      // Multi-drag: finalize
+      if (e.evt.button === 0 && multiDragStart.current) {
+        const { moved, positions } = multiDragStart.current;
+        if (moved) {
+          // Persist final positions
+          const objs = useBoardStore.getState().objects;
+          for (const id of Object.keys(positions)) {
+            const obj = objs[id];
+            if (obj) {
+              broadcastUpdate(id, { x: obj.x, y: obj.y });
+            }
+          }
+          // Frame containment checks for selected objects
+          const currentSelected = useBoardStore.getState().selectedIds;
+          for (const id of currentSelected) {
+            const obj = useBoardStore.getState().objects[id];
+            if (!obj || obj.type === "connector") continue;
+            if (obj.type === "frame") {
+              // Adopt/unadopt objects for frames
+              const latestObjs = useBoardStore.getState().objects;
+              for (const other of Object.values(latestObjs)) {
+                if (other.id === id || other.type === "connector" || other.type === "frame") continue;
+                const currentParent = (other.properties?.parentFrameId as string) || null;
+                if (isInsideFrame(other, obj)) {
+                  if (!currentParent) {
+                    broadcastUpdate(other.id, {
+                      properties: { ...other.properties, parentFrameId: id },
+                    });
+                  }
+                } else if (currentParent === id) {
+                  const newProps = { ...other.properties };
+                  delete newProps.parentFrameId;
+                  broadcastUpdate(other.id, { properties: newProps });
+                }
+              }
+            } else {
+              const currentParent = (obj.properties?.parentFrameId as string) || null;
+              const newParent = findInnermostFrame(obj, useBoardStore.getState().objects);
+              if (newParent !== currentParent) {
+                const newProps = { ...obj.properties };
+                if (newParent) {
+                  newProps.parentFrameId = newParent;
+                } else {
+                  delete newProps.parentFrameId;
+                }
+                broadcastUpdate(id, { properties: newProps });
+              }
+            }
+          }
+          isDraggingObject.current = true;
+        }
+        multiDragStart.current = null;
+        return;
       }
 
       // Drag-to-select: finish
@@ -840,6 +944,29 @@ export default function Canvas({
     const worldY = (pointer.y - stagePos.y) / scale;
     lastWorldPos.current = { x: worldX, y: worldY };
     handleCursorMove(worldX, worldY);
+
+    // Multi-drag: move all selected objects
+    if (multiDragStart.current) {
+      const dx = worldX - multiDragStart.current.startX;
+      const dy = worldY - multiDragStart.current.startY;
+      // 2px dead zone before starting drag
+      if (!multiDragStart.current.moved && Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
+      multiDragStart.current.moved = true;
+      const { positions } = multiDragStart.current;
+      for (const [id, initPos] of Object.entries(positions)) {
+        const newX = initPos.x + dx;
+        const newY = initPos.y + dy;
+        useBoardStore.getState().applyRemoteUpdate(id, { x: newX, y: newY });
+        broadcastLiveMoveRef.current(id, { x: newX, y: newY });
+        const node = stage.findOne("#" + id);
+        if (node) {
+          node.x(newX);
+          node.y(newY);
+        }
+      }
+      return;
+    }
+
     if (connectionDrag) {
       setConnectionDragPos({ x: worldX, y: worldY });
       // Hit-test for nearest dot across all objects
@@ -928,6 +1055,10 @@ export default function Canvas({
                   setSelectedIds([...current, obj.id]);
                 }
               } else {
+                const current = useBoardStore.getState().selectedIds;
+                if (current.length > 1 && current.includes(obj.id)) {
+                  return; // Keep multi-selection intact
+                }
                 setSelectedIds([obj.id]);
               }
             };
