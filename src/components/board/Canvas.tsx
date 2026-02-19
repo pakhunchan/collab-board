@@ -1234,7 +1234,7 @@ export default function Canvas({
             }}
           />
           {/* Connection dots for selected non-connector objects */}
-          {!connectionDrag && selectedIds
+          {!connectionDrag && selectedIds.length === 1 && selectedIds
             .filter((id) => objects[id] && objects[id].type !== "connector" && objects[id].type !== "frame")
             .map((id) => (
               <ConnectionDots
