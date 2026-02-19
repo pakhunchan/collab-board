@@ -11,8 +11,8 @@ interface FrameShapeProps {
   onDblClick: () => void;
 }
 
-const TITLE_BAR_HEIGHT = 32;
-const TITLE_PADDING = 10;
+const TITLE_HEIGHT = 24;
+const TITLE_PADDING = 4;
 
 export default function FrameShape({
   obj,
@@ -56,35 +56,27 @@ export default function FrameShape({
         });
       }}
     >
-      {/* Frame body */}
-      <Rect
-        width={obj.width}
-        height={obj.height}
-        fill="rgba(74, 144, 217, 0.08)"
-        stroke={isSelected ? "#1a73e8" : obj.color}
-        strokeWidth={2}
-        dash={isSelected ? undefined : [8, 4]}
-      />
-      {/* Title bar */}
-      <Rect
-        width={obj.width}
-        height={TITLE_BAR_HEIGHT}
-        fill={obj.color}
-        cornerRadius={[0, 0, 0, 0]}
-      />
-      {/* Title text */}
+      {/* Title text — positioned above the frame body */}
       <Text
         x={TITLE_PADDING}
-        y={0}
+        y={-TITLE_HEIGHT}
         width={obj.width - TITLE_PADDING * 2}
-        height={TITLE_BAR_HEIGHT}
+        height={TITLE_HEIGHT}
         text={obj.text || "Frame"}
         fontSize={14}
         fontFamily="sans-serif"
-        fontStyle="bold"
-        fill="#ffffff"
-        verticalAlign="middle"
+        fill="#666666"
+        verticalAlign="bottom"
         listening={false}
+      />
+      {/* Frame body — white background with subtle border */}
+      <Rect
+        width={obj.width}
+        height={obj.height}
+        fill="#ffffff"
+        stroke={isSelected ? "#1a73e8" : "#d0d0d0"}
+        strokeWidth={isSelected ? 2 : 1}
+        cornerRadius={4}
       />
     </Group>
   );
