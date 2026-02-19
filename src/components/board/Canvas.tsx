@@ -698,6 +698,7 @@ export default function Canvas({
   );
 
   // Handle double-click on sticky note for inline text editing
+  const FRAME_TITLE_HEIGHT = 24;
   const handleStickyDblClick = useCallback(
     (objId: string) => {
       const obj = useBoardStore.getState().objects[objId];
@@ -707,9 +708,13 @@ export default function Canvas({
 
       // Calculate screen position of the object
       const screenX = obj.x * scale + stagePos.x;
-      const screenY = obj.y * scale + stagePos.y;
+      let screenY = obj.y * scale + stagePos.y;
+      let screenH = obj.height * scale;
       const screenW = obj.width * scale;
-      const screenH = obj.height * scale;
+      if (obj.type === "frame") {
+        screenY -= FRAME_TITLE_HEIGHT * scale;
+        screenH = FRAME_TITLE_HEIGHT * scale;
+      }
 
       setEditingId(objId);
       setTextareaPos({ x: screenX, y: screenY, width: screenW, height: screenH });
@@ -1165,33 +1170,36 @@ export default function Canvas({
       )}
 
       {/* Inline text editing overlay */}
-      {editingId && (
-        <textarea
-          ref={textareaRef}
-          defaultValue={objects[editingId]?.text || ""}
-          onBlur={handleTextareaBlur}
-          onKeyDown={handleTextareaKeyDown}
-          style={{
-            position: "absolute",
-            top: textareaPos.y,
-            left: textareaPos.x,
-            width: textareaPos.width,
-            height: textareaPos.height,
-            padding: `${12 * scale}px`,
-            fontSize: `${16 * scale}px`,
-            fontFamily: "sans-serif",
-            color: "#333",
-            background: "transparent",
-            border: "2px solid #1a73e8",
-            borderRadius: `${4 * scale}px`,
-            outline: "none",
-            resize: "none",
-            overflow: "hidden",
-            zIndex: 10,
-            boxSizing: "border-box",
-          }}
-        />
-      )}
+      {editingId && (() => {
+        const isFrame = objects[editingId]?.type === "frame";
+        return (
+          <textarea
+            ref={textareaRef}
+            defaultValue={objects[editingId]?.text || ""}
+            onBlur={handleTextareaBlur}
+            onKeyDown={handleTextareaKeyDown}
+            style={{
+              position: "absolute",
+              top: textareaPos.y,
+              left: textareaPos.x,
+              width: textareaPos.width,
+              height: textareaPos.height,
+              padding: isFrame ? `${4 * scale}px` : `${12 * scale}px`,
+              fontSize: isFrame ? `${14 * scale}px` : `${16 * scale}px`,
+              fontFamily: "sans-serif",
+              color: isFrame ? "#666666" : "#333",
+              background: "transparent",
+              border: isFrame ? "none" : "2px solid #1a73e8",
+              borderRadius: isFrame ? "0" : `${4 * scale}px`,
+              outline: "none",
+              resize: "none",
+              overflow: "hidden",
+              zIndex: 10,
+              boxSizing: "border-box",
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

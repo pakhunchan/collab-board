@@ -67,7 +67,6 @@ export default function FrameShape({
         fontFamily="sans-serif"
         fill="#666666"
         verticalAlign="bottom"
-        listening={false}
       />
       {/* Frame body — white background with subtle border */}
       <Rect
