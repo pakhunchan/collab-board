@@ -84,22 +84,49 @@ export default function ConnectorShape({
 
   const fromId = obj.properties.fromId as string | undefined;
   const toId = obj.properties.toId as string | undefined;
+  const toX = obj.properties.toX as number | undefined;
+  const toY = obj.properties.toY as number | undefined;
 
-  if (!fromId || !toId) return null;
+  if (!fromId) return null;
 
   const fromObj = objects[fromId];
+  if (!fromObj) return null;
+
+  const color = isSelected ? "#1a73e8" : obj.color;
+
+  // Dangling arrow: no toId, just toX/toY
+  if (!toId && toX != null && toY != null) {
+    const fromSide = (obj.properties.fromPort as Side) || "right";
+    const fromPortPos = getPortPosition(fromObj, fromSide);
+    return (
+      <Arrow
+        id={obj.id}
+        points={[fromPortPos.x, fromPortPos.y, toX, toY]}
+        stroke={color}
+        strokeWidth={2}
+        pointerLength={10}
+        pointerWidth={8}
+        fill={color}
+        draggable={false}
+        hitStrokeWidth={20}
+        onClick={onSelect}
+        onTap={onSelect}
+      />
+    );
+  }
+
+  if (!toId) return null;
+
   const toObj = objects[toId];
+  if (!toObj) return null;
 
-  if (!fromObj || !toObj) return null;
-
-  const fromSide = getBestSide(fromObj, toObj);
-  const toSide = getBestSide(toObj, fromObj);
+  const fromSide = (obj.properties.fromPort as Side) || getBestSide(fromObj, toObj);
+  const toSide = (obj.properties.toPort as Side) || getBestSide(toObj, fromObj);
 
   const fromPort = getPortPosition(fromObj, fromSide);
   const toPort = getPortPosition(toObj, toSide);
 
   const points = getOrthogonalPath(fromPort, fromSide, toPort, toSide);
-  const color = isSelected ? "#1a73e8" : obj.color;
 
   return (
     <Arrow

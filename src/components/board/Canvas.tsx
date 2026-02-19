@@ -12,6 +12,7 @@ import CircleShape from "./CircleShape";
 import LineShape from "./LineShape";
 import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
+import ConnectionDots, { type Side, getPortPosition } from "./ConnectionDots";
 import Cursors from "./Cursors";
 
 const SHAPE_TOOLS = ["sticky", "rectangle", "circle", "text"] as const;
@@ -109,6 +110,10 @@ export default function Canvas({
   const [drawingShapeEnd, setDrawingShapeEnd] = useState<{ x: number; y: number } | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [connectorPreview, setConnectorPreview] = useState<{ x: number; y: number } | null>(null);
+  const [connectionDrag, setConnectionDrag] = useState<{ fromId: string; fromPort: Side } | null>(null);
+  const [connectionDragPos, setConnectionDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [hoverTargetId, setHoverTargetId] = useState<string | null>(null);
+  const [hoverPort, setHoverPort] = useState<Side | null>(null);
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -190,6 +195,10 @@ export default function Canvas({
         setDrawingShape(null);
         setDrawingShapeEnd(null);
         broadcastShapePreview(null);
+        setConnectionDrag(null);
+        setConnectionDragPos(null);
+        setHoverTargetId(null);
+        setHoverPort(null);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
         // Don't delete if an input/textarea is focused
@@ -238,6 +247,41 @@ export default function Canvas({
     tr.nodes(nodes);
     tr.getLayer()?.batchDraw();
   }, [selectedIds, objects]);
+
+  // Hit-test: find which non-connector object contains the point (excluding a given id)
+  const findObjectAtPoint = useCallback(
+    (x: number, y: number, excludeId: string): import("@/types/board").BoardObject | null => {
+      const objs = useBoardStore.getState().objects;
+      for (const obj of Object.values(objs)) {
+        if (obj.id === excludeId || obj.type === "connector") continue;
+        if (x >= obj.x && x <= obj.x + obj.width && y >= obj.y && y <= obj.y + obj.height) {
+          return obj;
+        }
+      }
+      return null;
+    },
+    []
+  );
+
+  // Find the nearest port on an object to a point; return the side if within ~20px threshold
+  const findNearestPort = useCallback(
+    (obj: import("@/types/board").BoardObject, x: number, y: number, s: number): Side | null => {
+      const sides: Side[] = ["top", "right", "bottom", "left"];
+      const threshold = 20 / s;
+      let best: Side | null = null;
+      let bestDist = Infinity;
+      for (const side of sides) {
+        const p = getPortPosition(obj, side);
+        const dist = Math.hypot(p.x - x, p.y - y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = side;
+        }
+      }
+      return bestDist <= threshold ? best : null;
+    },
+    []
+  );
 
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -318,6 +362,47 @@ export default function Canvas({
         setIsPanning(false);
       }
 
+      // Connection drag: finish
+      if (e.evt.button === 0 && connectionDrag) {
+        const stage = stageRef.current;
+        if (stage) {
+          const pointer = stage.getPointerPosition();
+          if (pointer) {
+            const worldX = (pointer.x - stagePos.x) / scale;
+            const worldY = (pointer.y - stagePos.y) / scale;
+            if (hoverTargetId && hoverTargetId !== connectionDrag.fromId) {
+              // Create connector to target object
+              const c = broadcastCreate("connector", 0, 0);
+              const props: Record<string, unknown> = {
+                fromId: connectionDrag.fromId,
+                toId: hoverTargetId,
+                fromPort: connectionDrag.fromPort,
+              };
+              if (hoverPort) props.toPort = hoverPort;
+              broadcastUpdate(c.id, { properties: props });
+            } else {
+              // Dangling arrow to canvas point
+              const c = broadcastCreate("connector", 0, 0);
+              broadcastUpdate(c.id, {
+                properties: {
+                  fromId: connectionDrag.fromId,
+                  fromPort: connectionDrag.fromPort,
+                  toX: worldX,
+                  toY: worldY,
+                },
+              });
+            }
+          }
+        }
+        setConnectionDrag(null);
+        setConnectionDragPos(null);
+        setHoverTargetId(null);
+        setHoverPort(null);
+        broadcastConnectorPreview(null);
+        isDraggingObject.current = true;
+        return;
+      }
+
       // Line tool: finish drawing
       if (e.evt.button === 0 && drawingLine) {
         const stage = stageRef.current;
@@ -387,7 +472,7 @@ export default function Canvas({
         broadcastShapePreview(null);
       }
     },
-    [drawingLine, drawingShape, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, setSelectedIds, setActiveTool]
+    [drawingLine, drawingShape, connectionDrag, hoverTargetId, hoverPort, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, broadcastConnectorPreview, setSelectedIds, setActiveTool]
   );
 
   // Handle object click when connector tool is active
@@ -504,6 +589,21 @@ export default function Canvas({
     const worldX = (pointer.x - stagePos.x) / scale;
     const worldY = (pointer.y - stagePos.y) / scale;
     handleCursorMove(worldX, worldY);
+    if (connectionDrag) {
+      setConnectionDragPos({ x: worldX, y: worldY });
+      // Hit-test for hover target
+      const target = findObjectAtPoint(worldX, worldY, connectionDrag.fromId);
+      if (target) {
+        setHoverTargetId(target.id);
+        setHoverPort(findNearestPort(target, worldX, worldY, scale));
+      } else {
+        setHoverTargetId(null);
+        setHoverPort(null);
+      }
+      // Broadcast preview for remote users
+      broadcastConnectorPreview({ fromId: connectionDrag.fromId, toX: worldX, toY: worldY });
+      return;
+    }
     if (drawingLine) {
       setDrawingLineEnd({ x: worldX, y: worldY });
       broadcastDrawPreview({ startX: drawingLine.startX, startY: drawingLine.startY, endX: worldX, endY: worldY });
@@ -516,10 +616,11 @@ export default function Canvas({
       setConnectorPreview({ x: worldX, y: worldY });
       broadcastConnectorPreview({ fromId: connectingFrom, toX: worldX, toY: worldY });
     }
-  }, [stagePos, scale, handleCursorMove, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastConnectorPreview, broadcastShapePreview]);
+  }, [stagePos, scale, handleCursorMove, connectionDrag, findObjectAtPoint, findNearestPort, broadcastConnectorPreview, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastShapePreview]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
+    if (connectionDrag) return "crosshair";
     if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text" || activeTool === "connector") return "crosshair";
     return "default";
   };
@@ -815,6 +916,46 @@ export default function Canvas({
               }
             }}
           />
+          {/* Connection dots for selected non-connector objects */}
+          {!connectionDrag && selectedIds
+            .filter((id) => objects[id] && objects[id].type !== "connector")
+            .map((id) => (
+              <ConnectionDots
+                key={`dots-${id}`}
+                obj={objects[id]}
+                scale={scale}
+                variant="selected"
+                onDotMouseDown={(port) => {
+                  setConnectionDrag({ fromId: id, fromPort: port });
+                }}
+              />
+            ))}
+          {/* Connection dots on hover target during drag */}
+          {connectionDrag && hoverTargetId && objects[hoverTargetId] && (
+            <ConnectionDots
+              obj={objects[hoverTargetId]}
+              scale={scale}
+              variant="target"
+              highlightedPort={hoverPort}
+            />
+          )}
+          {/* Preview arrow during connection drag */}
+          {connectionDrag && connectionDragPos && objects[connectionDrag.fromId] && (() => {
+            const fromPortPos = getPortPosition(objects[connectionDrag.fromId], connectionDrag.fromPort);
+            return (
+              <Arrow
+                points={[fromPortPos.x, fromPortPos.y, connectionDragPos.x, connectionDragPos.y]}
+                stroke="#1a73e8"
+                strokeWidth={2}
+                pointerLength={10}
+                pointerWidth={8}
+                fill="#1a73e8"
+                dash={[8, 4]}
+                listening={false}
+                opacity={0.6}
+              />
+            );
+          })()}
         </Layer>
         <Layer listening={false}>
           <Cursors remoteCursors={remoteCursors} scale={scale} />
