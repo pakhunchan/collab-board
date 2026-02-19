@@ -6,6 +6,7 @@ import { useRef } from "react";
 interface StickyNoteProps {
   obj: BoardObject;
   isSelected: boolean;
+  isEditing: boolean;
   onSelect: () => void;
   onChange: (changes: Partial<BoardObject>) => void;
   onDblClick: () => void;
@@ -17,6 +18,7 @@ const CORNER_RADIUS = 4;
 export default function StickyNote({
   obj,
   isSelected,
+  isEditing,
   onSelect,
   onChange,
   onDblClick,
@@ -78,6 +80,7 @@ export default function StickyNote({
         fill="#333"
         wrap="word"
         listening={false}
+        visible={!isEditing}
       />
     </Group>
   );

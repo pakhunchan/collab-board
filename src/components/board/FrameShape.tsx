@@ -6,6 +6,7 @@ import { useRef } from "react";
 interface FrameShapeProps {
   obj: BoardObject;
   isSelected: boolean;
+  isEditing: boolean;
   onSelect: () => void;
   onChange: (changes: Partial<BoardObject>) => void;
   onDblClick: () => void;
@@ -17,6 +18,7 @@ const TITLE_PADDING = 4;
 export default function FrameShape({
   obj,
   isSelected,
+  isEditing,
   onSelect,
   onChange,
   onDblClick,
@@ -67,6 +69,7 @@ export default function FrameShape({
         fontSize={14}
         fontFamily="sans-serif"
         fill="#666666"
+        visible={!isEditing}
       />
       {/* Frame body — white background with subtle border */}
       <Rect

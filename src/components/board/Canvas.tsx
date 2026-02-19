@@ -844,6 +844,7 @@ export default function Canvas({
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
+                isEditing={editingId === obj.id}
                 onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
@@ -886,6 +887,7 @@ export default function Canvas({
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
+                isEditing={editingId === obj.id}
                 onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
