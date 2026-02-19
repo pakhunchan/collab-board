@@ -24,35 +24,19 @@ function isInsideFrame(obj: BoardObject, frame: BoardObject): boolean {
          cy >= frame.y && cy <= frame.y + frame.height;
 }
 
-function getDescendantIds(frameId: string, objects: Record<string, BoardObject>): string[] {
-  const result: string[] = [];
-  const visited = new Set<string>();
-  const stack = [frameId];
-  while (stack.length) {
-    const fid = stack.pop()!;
-    if (visited.has(fid)) continue;
-    visited.add(fid);
-    for (const obj of Object.values(objects)) {
-      if (obj.properties?.parentFrameId === fid) {
-        result.push(obj.id);
-        if (obj.type === "frame") stack.push(obj.id);
-      }
-    }
-  }
-  return result;
+function getChildIds(frameId: string, objects: Record<string, BoardObject>): string[] {
+  return Object.values(objects)
+    .filter((o) => o.properties?.parentFrameId === frameId)
+    .map((o) => o.id);
 }
 
 function findInnermostFrame(obj: BoardObject, allObjects: Record<string, BoardObject>): string | null {
-  // If obj is a frame, exclude its own descendants to prevent cycles
-  const excludeIds = obj.type === "frame"
-    ? new Set(getDescendantIds(obj.id, allObjects))
-    : undefined;
+  if (obj.type === "frame") return null;
 
   let best: BoardObject | null = null;
   let bestArea = Infinity;
   for (const other of Object.values(allObjects)) {
     if (other.type !== "frame" || other.id === obj.id) continue;
-    if (excludeIds?.has(other.id)) continue;
     if (isInsideFrame(obj, other)) {
       const area = other.width * other.height;
       if (area < bestArea) { bestArea = area; best = other; }
@@ -213,8 +197,8 @@ export default function Canvas({
         const selected = useBoardStore.getState().selectedIds;
         // Only skip children that are being independently dragged in a multi-select
         const isMultiSelectDrag = selected.includes(id) && selected.length > 1;
-        const descendants = getDescendantIds(id, objs);
-        for (const childId of descendants) {
+        const children = getChildIds(id, objs);
+        for (const childId of children) {
           if (isMultiSelectDrag && selected.includes(childId)) continue;
           const child = objs[childId];
           if (!child) continue;
@@ -240,13 +224,36 @@ export default function Canvas({
       const obj = objs[id];
       if (!obj) return;
 
-      // If a frame was dragged, persist all descendants' final positions
+      // If a frame was dragged, persist children and adopt/unadopt objects
       if (obj.type === "frame") {
-        const descendants = getDescendantIds(id, objs);
-        for (const childId of descendants) {
+        const childIds = getChildIds(id, objs);
+        for (const childId of childIds) {
           const child = useBoardStore.getState().objects[childId];
           if (child) {
             broadcastUpdateRef.current(childId, { x: child.x, y: child.y });
+          }
+        }
+
+        // Drop-to-adopt: scan non-connector, non-frame objects
+        const latestObjs = useBoardStore.getState().objects;
+        const frame = latestObjs[id];
+        if (frame) {
+          for (const other of Object.values(latestObjs)) {
+            if (other.id === id || other.type === "connector" || other.type === "frame") continue;
+            const currentParent = (other.properties?.parentFrameId as string) || null;
+            if (isInsideFrame(other, frame)) {
+              // Adopt if not already parented to another frame
+              if (!currentParent) {
+                broadcastUpdateRef.current(other.id, {
+                  properties: { ...other.properties, parentFrameId: id },
+                });
+              }
+            } else if (currentParent === id) {
+              // Unadopt if center moved outside
+              const newProps = { ...other.properties };
+              delete newProps.parentFrameId;
+              broadcastUpdateRef.current(other.id, { properties: newProps });
+            }
           }
         }
       }
@@ -602,14 +609,10 @@ export default function Canvas({
           const allObjs = useBoardStore.getState().objects;
           const frame = allObjs[obj.id];
           if (frame) {
-            const insideIds = Object.values(allObjs).filter(
-              (o) => o.id !== obj.id && o.type !== "connector" && isInsideFrame(o, frame)
+            const insideObjs = Object.values(allObjs).filter(
+              (o) => o.id !== obj.id && o.type !== "connector" && o.type !== "frame" && isInsideFrame(o, frame)
             );
-            const adoptedFrameIds = new Set(insideIds.filter((o) => o.type === "frame").map((o) => o.id));
-            for (const child of insideIds) {
-              const currentParent = (child.properties?.parentFrameId as string) || null;
-              // Skip if already parented to a frame that is also being adopted (nested)
-              if (currentParent && adoptedFrameIds.has(currentParent)) continue;
+            for (const child of insideObjs) {
               broadcastUpdate(child.id, {
                 properties: { ...child.properties, parentFrameId: obj.id },
               });
