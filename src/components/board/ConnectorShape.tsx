@@ -275,7 +275,17 @@ export default function ConnectorShape({
         onMouseDown={(e) => {
           if (e.evt.button !== 0) return;
           e.cancelBubble = true;
-          onReconnect?.(obj.id, fromId, fromSide);
+          const stage = e.target.getStage();
+          if (!stage) return;
+          const pointer = stage.getPointerPosition();
+          if (!pointer) return;
+          const transform = e.target.getAbsoluteTransform().copy().invert();
+          const local = transform.point(pointer);
+          const dist = Math.hypot(local.x - toX, local.y - toY);
+          if (dist <= 20) {
+            onReconnect?.(obj.id, fromId, fromSide);
+          }
+          // else: don't call onReconnect — onClick will fire and select
         }}
         onClick={onSelect}
         onTap={onSelect}
