@@ -8,6 +8,9 @@ import { useCursors } from "@/hooks/useCursors";
 import { useBoardSync } from "@/hooks/useBoardSync";
 import StickyNote from "./StickyNote";
 import RectShape from "./RectShape";
+import CircleShape from "./CircleShape";
+import LineShape from "./LineShape";
+import TextShape from "./TextShape";
 import Cursors from "./Cursors";
 
 const MIN_SCALE = 0.1;
@@ -85,6 +88,7 @@ export default function Canvas({
   const [isPanning, setIsPanning] = useState(false);
   const spaceHeld = useRef(false);
   const isDraggingObject = useRef(false);
+  const [drawingLine, setDrawingLine] = useState<{ startX: number; startY: number } | null>(null);
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -232,8 +236,24 @@ export default function Canvas({
       if (e.evt.button === 1) {
         setIsPanning(true);
       }
+
+      // Line tool: start drawing on left click on empty canvas
+      if (e.evt.button === 0) {
+        const tool = useBoardStore.getState().activeTool;
+        if (tool === "line") {
+          const stage = stageRef.current;
+          if (!stage) return;
+          const target = e.target;
+          if (target !== stage) return;
+          const pointer = stage.getPointerPosition();
+          if (!pointer) return;
+          const worldX = (pointer.x - stagePos.x) / scale;
+          const worldY = (pointer.y - stagePos.y) / scale;
+          setDrawingLine({ startX: worldX, startY: worldY });
+        }
+      }
     },
-    []
+    [stagePos, scale]
   );
 
   const handleMouseUp = useCallback(
@@ -241,8 +261,35 @@ export default function Canvas({
       if (e.evt.button === 1 && !spaceHeld.current) {
         setIsPanning(false);
       }
+
+      // Line tool: finish drawing
+      if (e.evt.button === 0 && drawingLine) {
+        const stage = stageRef.current;
+        if (!stage) return;
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+        const worldX = (pointer.x - stagePos.x) / scale;
+        const worldY = (pointer.y - stagePos.y) / scale;
+        let dx = worldX - drawingLine.startX;
+        let dy = worldY - drawingLine.startY;
+        // If drag was tiny, create a default horizontal line
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+          dx = 200;
+          dy = 0;
+        }
+        const obj = broadcastCreate("line", drawingLine.startX, drawingLine.startY);
+        broadcastUpdate(obj.id, {
+          x: drawingLine.startX,
+          y: drawingLine.startY,
+          width: dx,
+          height: dy,
+        });
+        setSelectedIds([obj.id]);
+        setActiveTool("select");
+        setDrawingLine(null);
+      }
     },
-    []
+    [drawingLine, stagePos, scale, broadcastCreate, broadcastUpdate, setSelectedIds, setActiveTool]
   );
 
   // Click on stage: create objects or clear selection
@@ -268,7 +315,7 @@ export default function Canvas({
 
       const tool = useBoardStore.getState().activeTool;
 
-      if (tool === "sticky" || tool === "rectangle") {
+      if (tool === "sticky" || tool === "rectangle" || tool === "circle" || tool === "text") {
         // Clicked on empty area → create object
         if (e.target === stage) {
           const obj = broadcastCreate(tool, worldX, worldY);
@@ -340,7 +387,7 @@ export default function Canvas({
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
-    if (activeTool === "sticky" || activeTool === "rectangle") return "crosshair";
+    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text") return "crosshair";
     return "default";
   };
 
@@ -390,6 +437,31 @@ export default function Canvas({
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
               />
+            ) : obj.type === "circle" ? (
+              <CircleShape
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={() => setSelectedIds([obj.id])}
+                onChange={(changes) => broadcastUpdate(obj.id, changes)}
+              />
+            ) : obj.type === "line" ? (
+              <LineShape
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={() => setSelectedIds([obj.id])}
+                onChange={(changes) => broadcastUpdate(obj.id, changes)}
+              />
+            ) : obj.type === "text" ? (
+              <TextShape
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={() => setSelectedIds([obj.id])}
+                onChange={(changes) => broadcastUpdate(obj.id, changes)}
+                onDblClick={() => handleStickyDblClick(obj.id)}
+              />
             ) : (
               <RectShape
                 key={obj.id}
@@ -404,7 +476,7 @@ export default function Canvas({
             ref={transformerRef}
             rotateEnabled={true}
             boundBoxFunc={(_oldBox, newBox) => {
-              if (newBox.width < 30 || newBox.height < 30) return _oldBox;
+              if (newBox.width < 5 || newBox.height < 5) return _oldBox;
               return newBox;
             }}
           />

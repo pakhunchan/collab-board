@@ -1,16 +1,22 @@
 import { create } from "zustand";
 import { BoardObject, BoardObjectType } from "@/types/board";
 
-export type Tool = "select" | "pan" | "sticky" | "rectangle";
+export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text";
 
 const DEFAULT_COLORS: Record<BoardObjectType, string> = {
   sticky: "#FFEB3B",
   rectangle: "#90CAF9",
+  circle: "#CE93D8",
+  line: "#666666",
+  text: "#333333",
 };
 
 const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> = {
   sticky: { width: 200, height: 200 },
   rectangle: { width: 240, height: 160 },
+  circle: { width: 160, height: 160 },
+  line: { width: 200, height: 0 },
+  text: { width: 200, height: 40 },
 };
 
 interface BoardStore {
@@ -57,6 +63,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       width: size.width,
       height: size.height,
       rotation: 0,
+      ...(type === "text" ? { text: "Text" } : {}),
       color: DEFAULT_COLORS[type],
       zIndex: Object.keys(get().objects).length,
       properties: {},

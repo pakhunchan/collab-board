@@ -16,6 +16,9 @@ const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "pan", label: "Pan", icon: "✋" },
   { id: "sticky", label: "Sticky Note", icon: "▢" },
   { id: "rectangle", label: "Rectangle", icon: "□" },
+  { id: "circle", label: "Circle", icon: "○" },
+  { id: "line", label: "Line", icon: "╱" },
+  { id: "text", label: "Text", icon: "T" },
 ];
 
 export default function Toolbar({
