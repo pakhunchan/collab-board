@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { User } from "firebase/auth";
 import { useAuth } from "@/lib/auth-context";
@@ -36,6 +36,11 @@ export function useBoardSync(
   );
   const lastLiveMoveRef = useRef<number>(0);
   const liveMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDrawPreviewRef = useRef<number>(0);
+  const drawPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [remoteDrawPreviews, setRemoteDrawPreviews] = useState<
+    Record<string, { startX: number; startY: number; endX: number; endY: number }>
+  >({});
   const pendingBroadcasts = useRef<
     Array<{ event: string; payload: Record<string, unknown> }>
   >([]);
@@ -270,6 +275,28 @@ export function useBoardSync(
       }
     );
 
+    // Incoming: draw:preview — ephemeral line drawing preview from another user
+    channel.on(
+      "broadcast",
+      { event: "draw:preview" },
+      (payload: {
+        payload: {
+          senderId: string;
+          preview: { startX: number; startY: number; endX: number; endY: number } | null;
+        };
+      }) => {
+        const { senderId, preview } = payload.payload;
+        setRemoteDrawPreviews((prev) => {
+          if (preview) {
+            return { ...prev, [senderId]: preview };
+          }
+          const next = { ...prev };
+          delete next[senderId];
+          return next;
+        });
+      }
+    );
+
     // Incoming: member:joined — new member accepted an invite
     channel.on(
       "broadcast",
@@ -442,5 +469,47 @@ export function useBoardSync(
     [user]
   );
 
-  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove };
+  // Outgoing: broadcastDrawPreview (throttled, broadcast-only — ephemeral line preview)
+  const broadcastDrawPreview = useCallback(
+    (preview: { startX: number; startY: number; endX: number; endY: number } | null) => {
+      if (!channelRef.current || !connectedRef.current) return;
+
+      const send = () => {
+        lastDrawPreviewRef.current = Date.now();
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "draw:preview",
+          payload: {
+            senderId: user?.uid || "",
+            preview,
+          },
+        });
+      };
+
+      // Send clear immediately
+      if (!preview) {
+        if (drawPreviewTimerRef.current) {
+          clearTimeout(drawPreviewTimerRef.current);
+          drawPreviewTimerRef.current = null;
+        }
+        send();
+        return;
+      }
+
+      const elapsed = Date.now() - lastDrawPreviewRef.current;
+      if (elapsed >= 50) {
+        if (drawPreviewTimerRef.current) {
+          clearTimeout(drawPreviewTimerRef.current);
+          drawPreviewTimerRef.current = null;
+        }
+        send();
+      } else {
+        if (drawPreviewTimerRef.current) clearTimeout(drawPreviewTimerRef.current);
+        drawPreviewTimerRef.current = setTimeout(send, 50 - elapsed);
+      }
+    },
+    [user]
+  );
+
+  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews };
 }

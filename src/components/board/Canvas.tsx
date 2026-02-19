@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Circle, Arrow, Transformer } from "react-konva";
+import { Stage, Layer, Circle, Arrow, Line as KonvaLine, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
 import { useCursors } from "@/hooks/useCursors";
@@ -90,6 +90,7 @@ export default function Canvas({
   const spaceHeld = useRef(false);
   const isDraggingObject = useRef(false);
   const [drawingLine, setDrawingLine] = useState<{ startX: number; startY: number } | null>(null);
+  const [drawingLineEnd, setDrawingLineEnd] = useState<{ x: number; y: number } | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [connectorPreview, setConnectorPreview] = useState<{ x: number; y: number } | null>(null);
 
@@ -97,7 +98,7 @@ export default function Canvas({
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -301,9 +302,11 @@ export default function Canvas({
         setSelectedIds([obj.id]);
         setActiveTool("select");
         setDrawingLine(null);
+        setDrawingLineEnd(null);
+        broadcastDrawPreview(null);
       }
     },
-    [drawingLine, stagePos, scale, broadcastCreate, broadcastUpdate, setSelectedIds, setActiveTool]
+    [drawingLine, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, setSelectedIds, setActiveTool]
   );
 
   // Handle object click when connector tool is active
@@ -429,10 +432,14 @@ export default function Canvas({
     const worldX = (pointer.x - stagePos.x) / scale;
     const worldY = (pointer.y - stagePos.y) / scale;
     handleCursorMove(worldX, worldY);
+    if (drawingLine) {
+      setDrawingLineEnd({ x: worldX, y: worldY });
+      broadcastDrawPreview({ startX: drawingLine.startX, startY: drawingLine.startY, endX: worldX, endY: worldY });
+    }
     if (connectingFrom) {
       setConnectorPreview({ x: worldX, y: worldY });
     }
-  }, [stagePos, scale, handleCursorMove, connectingFrom]);
+  }, [stagePos, scale, handleCursorMove, drawingLine, broadcastDrawPreview, connectingFrom]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
@@ -531,6 +538,27 @@ export default function Canvas({
               />
             );
           })}
+          {/* Preview line while drawing (local) */}
+          {drawingLine && drawingLineEnd && (
+            <KonvaLine
+              points={[drawingLine.startX, drawingLine.startY, drawingLineEnd.x, drawingLineEnd.y]}
+              stroke="#666666"
+              strokeWidth={2}
+              listening={false}
+            />
+          )}
+          {/* Preview lines from remote users */}
+          {Object.entries(remoteDrawPreviews).map(([uid, p]) => (
+            <KonvaLine
+              key={`draw-preview-${uid}`}
+              points={[p.startX, p.startY, p.endX, p.endY]}
+              stroke="#666666"
+              strokeWidth={2}
+              dash={[6, 4]}
+              opacity={0.5}
+              listening={false}
+            />
+          ))}
           {/* Preview arrow while connecting */}
           {connectingFrom && connectorPreview && objects[connectingFrom] && (() => {
             const src = objects[connectingFrom];
