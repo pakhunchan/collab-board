@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyFirebaseToken } from "@/lib/auth-helpers";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { broadcastBoardEvent } from "@/lib/supabase/broadcast";
 
 export async function POST(
   request: Request,
@@ -40,16 +41,25 @@ export async function POST(
     .single();
 
   if (!existing) {
+    const displayName = decoded.name || decoded.email || null;
     const { error } = await supabase.from("board_members").insert({
       board_id: invite.board_id,
       user_id: decoded.uid,
-      display_name: decoded.name || decoded.email || null,
+      display_name: displayName,
       role: "editor",
     });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    // Fire-and-forget: notify SharePanel listeners about the new member
+    broadcastBoardEvent(invite.board_id, "member:joined", {
+      user_id: decoded.uid,
+      display_name: displayName,
+      role: "editor",
+      joined_at: new Date().toISOString(),
+    });
   }
 
   return NextResponse.json({ boardId: invite.board_id });

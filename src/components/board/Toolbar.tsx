@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MutableRefObject } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useBoardStore, Tool } from "@/stores/boardStore";
@@ -8,6 +8,8 @@ import PresenceBar from "@/components/board/PresenceBar";
 import ConnectionStatusIndicator from "@/components/board/ConnectionStatus";
 import SharePanel from "@/components/board/SharePanel";
 import type { ConnectionStatus } from "@/hooks/useConnectionManager";
+
+type JoinedMember = { user_id: string; display_name: string | null; role: string; joined_at: string };
 
 const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "select", label: "Select", icon: "↖" },
@@ -19,9 +21,11 @@ const tools: { id: Tool; label: string; icon: string }[] = [
 export default function Toolbar({
   boardId,
   connectionStatus,
+  memberJoinedRef,
 }: {
   boardId: string;
   connectionStatus: ConnectionStatus;
+  memberJoinedRef?: MutableRefObject<((m: JoinedMember) => void) | null>;
 }) {
   const activeTool = useBoardStore((s) => s.activeTool);
   const setActiveTool = useBoardStore((s) => s.setActiveTool);
@@ -73,7 +77,7 @@ export default function Toolbar({
         </button>
       </div>
       {showShare && (
-        <SharePanel boardId={boardId} onClose={() => setShowShare(false)} />
+        <SharePanel boardId={boardId} onClose={() => setShowShare(false)} memberJoinedRef={memberJoinedRef} />
       )}
     </div>
   );

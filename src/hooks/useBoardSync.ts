@@ -25,7 +25,8 @@ export function useBoardSync(
   boardId: string | undefined,
   reconnectKey = 0,
   onChannelStatus?: (channelId: string, status: string) => void,
-  onAccessRevoked?: () => void
+  onAccessRevoked?: () => void,
+  onMemberJoined?: (member: { user_id: string; display_name: string | null; role: string; joined_at: string }) => void
 ) {
   const { user } = useAuth();
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -269,6 +270,15 @@ export function useBoardSync(
       }
     );
 
+    // Incoming: member:joined — new member accepted an invite
+    channel.on(
+      "broadcast",
+      { event: "member:joined" },
+      (payload: { payload: { user_id: string; display_name: string | null; role: string; joined_at: string } }) => {
+        onMemberJoined?.(payload.payload);
+      }
+    );
+
     // Subscribe AFTER registering listeners
     const channelName = `board:${boardId}:objects`;
     channel.subscribe((status) => {
@@ -290,7 +300,7 @@ export function useBoardSync(
       channelRef.current = null;
       channel.unsubscribe();
     };
-  }, [boardId, user, reconnectKey, onChannelStatus, onAccessRevoked, drainPendingBroadcasts]);
+  }, [boardId, user, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined, drainPendingBroadcasts]);
 
   // Cleanup debounce timers on unmount
   useEffect(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Toolbar from "@/components/board/Toolbar";
@@ -47,6 +47,14 @@ export default function BoardPage({ params }: { params: { id: string } }) {
     setAccess("denied");
   }, []);
 
+  // Forward member:joined events from the Realtime channel to SharePanel.
+  // Uses a ref so the callback identity is stable (avoids channel reconnects).
+  type JoinedMember = { user_id: string; display_name: string | null; role: string; joined_at: string };
+  const memberJoinedRef = useRef<((m: JoinedMember) => void) | null>(null);
+  const onMemberJoined = useCallback((member: JoinedMember) => {
+    memberJoinedRef.current?.(member);
+  }, []);
+
   if (access === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -74,13 +82,14 @@ export default function BoardPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <Toolbar boardId={params.id} connectionStatus={status} />
+      <Toolbar boardId={params.id} connectionStatus={status} memberJoinedRef={memberJoinedRef} />
       <div className="flex-1 relative">
         <Canvas
           boardId={params.id}
           reconnectKey={reconnectKey}
           onChannelStatus={onChannelStatus}
           onAccessRevoked={onAccessRevoked}
+          onMemberJoined={onMemberJoined}
         />
       </div>
     </div>

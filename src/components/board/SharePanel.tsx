@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type MutableRefObject } from "react";
 import { useAuth } from "@/lib/auth-context";
 
 interface Invite {
@@ -20,9 +20,11 @@ interface Member {
 export default function SharePanel({
   boardId,
   onClose,
+  memberJoinedRef,
 }: {
   boardId: string;
   onClose: () => void;
+  memberJoinedRef?: MutableRefObject<((m: Member) => void) | null>;
 }) {
   const { user } = useAuth();
   const [isOwner, setIsOwner] = useState(false);
@@ -85,6 +87,20 @@ export default function SharePanel({
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Register handler for real-time member:joined events via the shared channel
+  useEffect(() => {
+    if (!memberJoinedRef) return;
+    memberJoinedRef.current = (member: Member) => {
+      setMembers((prev) => {
+        if (prev.some((m) => m.user_id === member.user_id)) return prev;
+        return [...prev, member];
+      });
+    };
+    return () => {
+      memberJoinedRef.current = null;
+    };
+  }, [memberJoinedRef]);
 
   const handleGenerate = async () => {
     setGenerating(true);
