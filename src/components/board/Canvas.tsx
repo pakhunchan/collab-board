@@ -6,16 +6,62 @@ import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
 import { useCursors } from "@/hooks/useCursors";
 import { useBoardSync } from "@/hooks/useBoardSync";
+import { BoardObject } from "@/types/board";
 import StickyNote from "./StickyNote";
 import RectShape from "./RectShape";
 import CircleShape from "./CircleShape";
 import LineShape from "./LineShape";
 import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
+import FrameShape from "./FrameShape";
 import ConnectionDots, { type Side, getPortPosition, getDotPosition } from "./ConnectionDots";
 import Cursors from "./Cursors";
 
-const SHAPE_TOOLS = ["sticky", "rectangle", "circle", "text"] as const;
+function isInsideFrame(obj: BoardObject, frame: BoardObject): boolean {
+  const cx = obj.x + obj.width / 2;
+  const cy = obj.y + obj.height / 2;
+  return cx >= frame.x && cx <= frame.x + frame.width &&
+         cy >= frame.y && cy <= frame.y + frame.height;
+}
+
+function getDescendantIds(frameId: string, objects: Record<string, BoardObject>): string[] {
+  const result: string[] = [];
+  const visited = new Set<string>();
+  const stack = [frameId];
+  while (stack.length) {
+    const fid = stack.pop()!;
+    if (visited.has(fid)) continue;
+    visited.add(fid);
+    for (const obj of Object.values(objects)) {
+      if (obj.properties?.parentFrameId === fid) {
+        result.push(obj.id);
+        if (obj.type === "frame") stack.push(obj.id);
+      }
+    }
+  }
+  return result;
+}
+
+function findInnermostFrame(obj: BoardObject, allObjects: Record<string, BoardObject>): string | null {
+  // If obj is a frame, exclude its own descendants to prevent cycles
+  const excludeIds = obj.type === "frame"
+    ? new Set(getDescendantIds(obj.id, allObjects))
+    : undefined;
+
+  let best: BoardObject | null = null;
+  let bestArea = Infinity;
+  for (const other of Object.values(allObjects)) {
+    if (other.type !== "frame" || other.id === obj.id) continue;
+    if (excludeIds?.has(other.id)) continue;
+    if (isInsideFrame(obj, other)) {
+      const area = other.width * other.height;
+      if (area < bestArea) { bestArea = area; best = other; }
+    }
+  }
+  return best?.id ?? null;
+}
+
+const SHAPE_TOOLS = ["sticky", "rectangle", "circle", "text", "frame"] as const;
 type ShapeTool = (typeof SHAPE_TOOLS)[number];
 
 const SHAPE_PREVIEW_COLORS: Record<ShapeTool, string> = {
@@ -23,6 +69,7 @@ const SHAPE_PREVIEW_COLORS: Record<ShapeTool, string> = {
   rectangle: "#90CAF9",
   circle: "#CE93D8",
   text: "#333333",
+  frame: "rgba(74, 144, 217, 0.15)",
 };
 
 function isShapeTool(tool: string): tool is ShapeTool {
@@ -136,11 +183,13 @@ export default function Canvas({
 
   const hasCircle = selectedIds.some((id) => objects[id]?.type === "circle");
 
-  // Keep a stable ref to broadcastLiveMove so the native listener always calls the latest version
+  // Keep stable refs so native Konva listeners always call the latest versions
   const broadcastLiveMoveRef = useRef(broadcastLiveMove);
   broadcastLiveMoveRef.current = broadcastLiveMove;
+  const broadcastUpdateRef = useRef(broadcastUpdate);
+  broadcastUpdateRef.current = broadcastUpdate;
 
-  // Native Konva dragmove listener for live position sync
+  // Native Konva dragmove + dragend listeners for live position sync and frame containment
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -149,16 +198,82 @@ export default function Canvas({
       const node = e.target;
       if (node === stage) return;
       const id = node.id();
-      if (id) {
-        const changes = { x: node.x(), y: node.y() };
-        useBoardStore.getState().applyRemoteUpdate(id, changes);
-        broadcastLiveMoveRef.current(id, changes);
+      if (!id) return;
+
+      const objs = useBoardStore.getState().objects;
+      const obj = objs[id];
+      const changes = { x: node.x(), y: node.y() };
+      useBoardStore.getState().applyRemoteUpdate(id, changes);
+      broadcastLiveMoveRef.current(id, changes);
+
+      // If dragging a frame, move all descendants
+      if (obj?.type === "frame") {
+        const dx = node.x() - obj.x;
+        const dy = node.y() - obj.y;
+        const selected = useBoardStore.getState().selectedIds;
+        // Only skip children that are being independently dragged in a multi-select
+        const isMultiSelectDrag = selected.includes(id) && selected.length > 1;
+        const descendants = getDescendantIds(id, objs);
+        for (const childId of descendants) {
+          if (isMultiSelectDrag && selected.includes(childId)) continue;
+          const child = objs[childId];
+          if (!child) continue;
+          const childNode = stage.findOne("#" + childId);
+          if (childNode) {
+            childNode.x(child.x + dx);
+            childNode.y(child.y + dy);
+          }
+          const childChanges = { x: child.x + dx, y: child.y + dy };
+          useBoardStore.getState().applyRemoteUpdate(childId, childChanges);
+          broadcastLiveMoveRef.current(childId, childChanges);
+        }
+      }
+    };
+
+    const dragEndHandler = (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      if (node === stage) return;
+      const id = node.id();
+      if (!id) return;
+
+      const objs = useBoardStore.getState().objects;
+      const obj = objs[id];
+      if (!obj) return;
+
+      // If a frame was dragged, persist all descendants' final positions
+      if (obj.type === "frame") {
+        const descendants = getDescendantIds(id, objs);
+        for (const childId of descendants) {
+          const child = useBoardStore.getState().objects[childId];
+          if (child) {
+            broadcastUpdateRef.current(childId, { x: child.x, y: child.y });
+          }
+        }
+      }
+
+      // For non-connector objects: detect frame containment changes
+      if (obj.type !== "connector") {
+        const updatedObj = useBoardStore.getState().objects[id];
+        if (!updatedObj) return;
+        const currentParent = (updatedObj.properties?.parentFrameId as string) || null;
+        const newParent = findInnermostFrame(updatedObj, useBoardStore.getState().objects);
+        if (newParent !== currentParent) {
+          const newProps = { ...updatedObj.properties };
+          if (newParent) {
+            newProps.parentFrameId = newParent;
+          } else {
+            delete newProps.parentFrameId;
+          }
+          broadcastUpdateRef.current(id, { properties: newProps });
+        }
       }
     };
 
     stage.on("dragmove", handler);
+    stage.on("dragend", dragEndHandler);
     return () => {
       stage.off("dragmove", handler);
+      stage.off("dragend", dragEndHandler);
     };
   }, []);
 
@@ -207,6 +322,18 @@ export default function Canvas({
         const tag = (e.target as HTMLElement).tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
         const ids = useBoardStore.getState().selectedIds;
+        // Unparent children of frames being deleted
+        for (const id of ids) {
+          const obj = useBoardStore.getState().objects[id];
+          if (obj?.type === "frame") {
+            const children = useBoardStore.getState().getFrameChildren(id);
+            for (const child of children) {
+              const newProps = { ...child.properties };
+              delete newProps.parentFrameId;
+              broadcastUpdate(child.id, { properties: newProps });
+            }
+          }
+        }
         const connectorIds = new Set<string>();
         for (const id of ids) {
           for (const cid of useBoardStore.getState().getConnectorsForObject(id)) {
@@ -228,7 +355,7 @@ export default function Canvas({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [editingId, broadcastDelete, broadcastConnectorPreview, broadcastShapePreview]);
+  }, [editingId, broadcastDelete, broadcastUpdate, broadcastConnectorPreview, broadcastShapePreview]);
 
   // Attach transformer to selected nodes
   useEffect(() => {
@@ -426,8 +553,7 @@ export default function Canvas({
           dx = 200;
           dy = 0;
         }
-        const obj = broadcastCreate("line", drawingLine.startX, drawingLine.startY);
-        broadcastUpdate(obj.id, {
+        const obj = broadcastCreate("line", drawingLine.startX, drawingLine.startY, {
           x: drawingLine.startX,
           y: drawingLine.startY,
           width: dx,
@@ -468,8 +594,27 @@ export default function Canvas({
           }
           const cx = bx + bw / 2;
           const cy = by + bh / 2;
-          obj = broadcastCreate(drawingShape.tool, cx, cy);
-          broadcastUpdate(obj.id, { x: bx, y: by, width: bw, height: bh });
+          obj = broadcastCreate(drawingShape.tool, cx, cy, { x: bx, y: by, width: bw, height: bh });
+        }
+
+        // Auto-adopt: if a frame was just created, adopt objects whose center falls inside it
+        if (drawingShape.tool === "frame") {
+          const allObjs = useBoardStore.getState().objects;
+          const frame = allObjs[obj.id];
+          if (frame) {
+            const insideIds = Object.values(allObjs).filter(
+              (o) => o.id !== obj.id && o.type !== "connector" && isInsideFrame(o, frame)
+            );
+            const adoptedFrameIds = new Set(insideIds.filter((o) => o.type === "frame").map((o) => o.id));
+            for (const child of insideIds) {
+              const currentParent = (child.properties?.parentFrameId as string) || null;
+              // Skip if already parented to a frame that is also being adopted (nested)
+              if (currentParent && adoptedFrameIds.has(currentParent)) continue;
+              broadcastUpdate(child.id, {
+                properties: { ...child.properties, parentFrameId: obj.id },
+              });
+            }
+          }
         }
 
         isDraggingObject.current = true;
@@ -630,7 +775,7 @@ export default function Canvas({
   const cursorForTool = () => {
     if (isPanning) return "grab";
     if (connectionDrag) return "crosshair";
-    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text" || activeTool === "connector") return "crosshair";
+    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text" || activeTool === "connector" || activeTool === "frame") return "crosshair";
     return "default";
   };
 
@@ -709,6 +854,15 @@ export default function Canvas({
               />
             ) : obj.type === "text" ? (
               <TextShape
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={onSelect}
+                onChange={(changes) => broadcastUpdate(obj.id, changes)}
+                onDblClick={() => handleStickyDblClick(obj.id)}
+              />
+            ) : obj.type === "frame" ? (
+              <FrameShape
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
@@ -936,7 +1090,7 @@ export default function Canvas({
           />
           {/* Connection dots for selected non-connector objects */}
           {!connectionDrag && selectedIds
-            .filter((id) => objects[id] && objects[id].type !== "connector")
+            .filter((id) => objects[id] && objects[id].type !== "connector" && objects[id].type !== "frame")
             .map((id) => (
               <ConnectionDots
                 key={`dots-${id}`}
@@ -951,7 +1105,7 @@ export default function Canvas({
           {/* Connection dots on nearby potential targets during drag */}
           {connectionDrag &&
             Object.values(objects)
-              .filter((o) => o.type !== "connector" && o.id !== connectionDrag.fromId && nearbyTargetIds.includes(o.id))
+              .filter((o) => o.type !== "connector" && o.type !== "frame" && o.id !== connectionDrag.fromId && nearbyTargetIds.includes(o.id))
               .map((o) => (
                 <ConnectionDots
                   key={`target-dots-${o.id}`}

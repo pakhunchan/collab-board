@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { BoardObject, BoardObjectType } from "@/types/board";
 
-export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text" | "connector";
+export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text" | "connector" | "frame";
 
 const DEFAULT_COLORS: Record<BoardObjectType, string> = {
   sticky: "#FFEB3B",
@@ -10,6 +10,7 @@ const DEFAULT_COLORS: Record<BoardObjectType, string> = {
   line: "#666666",
   text: "#333333",
   connector: "#666666",
+  frame: "#4A90D9",
 };
 
 const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> = {
@@ -19,6 +20,7 @@ const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> 
   line: { width: 200, height: 0 },
   text: { width: 200, height: 40 },
   connector: { width: 0, height: 0 },
+  frame: { width: 400, height: 300 },
 };
 
 interface BoardStore {
@@ -44,6 +46,9 @@ interface BoardStore {
   // Connectors
   getConnectorsForObject: (objectId: string) => string[];
 
+  // Frames
+  getFrameChildren: (frameId: string) => BoardObject[];
+
   // Selection
   selectedIds: string[];
   setSelectedIds: (ids: string[]) => void;
@@ -68,9 +73,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       width: size.width,
       height: size.height,
       rotation: 0,
-      ...(type === "text" ? { text: "Text" } : {}),
+      ...(type === "text" ? { text: "Text" } : type === "frame" ? { text: "Frame" } : {}),
       color: DEFAULT_COLORS[type],
-      zIndex: Object.keys(get().objects).length,
+      zIndex: type === "frame" ? -1 : Object.keys(get().objects).length,
       properties: {},
       createdBy: "",
       updatedAt: now,
@@ -168,6 +173,12 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     return Object.values(get().objects)
       .filter((o) => o.type === "connector" && (o.properties.fromId === objectId || o.properties.toId === objectId))
       .map((o) => o.id);
+  },
+
+  getFrameChildren: (frameId) => {
+    return Object.values(get().objects).filter(
+      (o) => o.properties?.parentFrameId === frameId
+    );
   },
 
   selectedIds: [],

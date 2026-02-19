@@ -394,14 +394,15 @@ export function useBoardSync(
 
   // Outgoing: broadcastCreate
   const broadcastCreate = useCallback(
-    (type: BoardObjectType, x: number, y: number) => {
+    (type: BoardObjectType, x: number, y: number, overrides?: Partial<BoardObject>) => {
       const store = useBoardStore.getState();
       const obj = store.addObject(type, x, y);
 
-      // Patch with real boardId and createdBy
+      // Patch with real boardId and createdBy, plus any overrides (e.g. final dimensions)
       const patched: Partial<BoardObject> = {
         boardId: boardId || "",
         createdBy: user?.uid || "",
+        ...overrides,
       };
       store.updateObject(obj.id, patched);
 
