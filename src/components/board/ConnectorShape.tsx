@@ -21,21 +21,6 @@ function rotatePoint(px: number, py: number, ox: number, oy: number, deg: number
   return { x: ox + dx * cos - dy * sin, y: oy + dx * sin + dy * cos };
 }
 
-function getCenter(obj: BoardObject) {
-  return rotatePoint(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.x, obj.y, obj.rotation);
-}
-
-function getBestSide(from: BoardObject, to: BoardObject): Side {
-  const fc = getCenter(from);
-  const tc = getCenter(to);
-  const dx = tc.x - fc.x;
-  const dy = tc.y - fc.y;
-  if (Math.abs(dx) > Math.abs(dy)) {
-    return dx > 0 ? "right" : "left";
-  }
-  return dy > 0 ? "bottom" : "top";
-}
-
 function getPortPosition(obj: BoardObject, side: Side) {
   let pos;
   switch (side) {
@@ -86,11 +71,15 @@ function getOrthogonalPath(
           midX = Math.min(fromObj.x, toObj.x) - PAD;
         }
       } else {
-        if (midX > fromObj.x && midX < fromObj.x + fromObj.width) {
-          midX = fromSide === "right" ? fromObj.x + fromObj.width + PAD : fromObj.x - PAD;
-        }
-        if (midX > toObj.x && midX < toObj.x + toObj.width) {
-          midX = toSide === "right" ? toObj.x + toObj.width + PAD : toObj.x - PAD;
+        const candidates = [
+          (fx + tx) / 2,
+          Math.min(fromObj.x, toObj.x) - PAD,
+          Math.max(fromObj.x + fromObj.width, toObj.x + toObj.width) + PAD,
+        ];
+        let bestScore = Infinity;
+        for (const c of candidates) {
+          const s = scoreMidPath([fx, fy, c, fy, c, ty, tx, ty], fromObj, toObj);
+          if (s < bestScore) { bestScore = s; midX = c; }
         }
       }
     }
@@ -106,26 +95,100 @@ function getOrthogonalPath(
           midY = Math.min(fromObj.y, toObj.y) - PAD;
         }
       } else {
-        if (midY > fromObj.y && midY < fromObj.y + fromObj.height) {
-          midY = fromSide === "bottom" ? fromObj.y + fromObj.height + PAD : fromObj.y - PAD;
-        }
-        if (midY > toObj.y && midY < toObj.y + toObj.height) {
-          midY = toSide === "bottom" ? toObj.y + toObj.height + PAD : toObj.y - PAD;
+        const candidates = [
+          (fy + ty) / 2,
+          Math.min(fromObj.y, toObj.y) - PAD,
+          Math.max(fromObj.y + fromObj.height, toObj.y + toObj.height) + PAD,
+        ];
+        let bestScore = Infinity;
+        for (const c of candidates) {
+          const s = scoreMidPath([fx, fy, fx, c, tx, c, tx, ty], fromObj, toObj);
+          if (s < bestScore) { bestScore = s; midY = c; }
         }
       }
     }
     points.push(fx, midY);
     points.push(tx, midY);
   } else if (fromH) {
-    points.push(tx, fy);
+    // L-bend: horizontal exit → vertical entry
+    // Simple corner at (tx, fy) — check if it overlaps either object
+    if (fromObj && toObj &&
+        (segmentOverlapsObject(fx, fy, tx, fy, fromObj) || segmentOverlapsObject(fx, fy, tx, fy, toObj) ||
+         segmentOverlapsObject(tx, fy, tx, ty, fromObj) || segmentOverlapsObject(tx, fy, tx, ty, toObj))) {
+      // Convert to 3-segment route with best midY
+      const candidates = [
+        (fy + ty) / 2,
+        Math.min(fromObj.y, toObj.y) - PAD,
+        Math.max(fromObj.y + fromObj.height, toObj.y + toObj.height) + PAD,
+      ];
+      let bestMidY = candidates[0], bestScore = Infinity;
+      for (const c of candidates) {
+        const s = scoreMidPath([fx, fy, fx, c, tx, c, tx, ty], fromObj, toObj);
+        if (s < bestScore) { bestScore = s; bestMidY = c; }
+      }
+      points.push(fx, bestMidY);
+      points.push(tx, bestMidY);
+    } else {
+      points.push(tx, fy);
+    }
   } else {
-    points.push(fx, ty);
+    // L-bend: vertical exit → horizontal entry
+    // Simple corner at (fx, ty) — check if it overlaps either object
+    if (fromObj && toObj &&
+        (segmentOverlapsObject(fx, fy, fx, ty, fromObj) || segmentOverlapsObject(fx, fy, fx, ty, toObj) ||
+         segmentOverlapsObject(fx, ty, tx, ty, fromObj) || segmentOverlapsObject(fx, ty, tx, ty, toObj))) {
+      // Convert to 3-segment route with best midX
+      const candidates = [
+        (fx + tx) / 2,
+        Math.min(fromObj.x, toObj.x) - PAD,
+        Math.max(fromObj.x + fromObj.width, toObj.x + toObj.width) + PAD,
+      ];
+      let bestMidX = candidates[0], bestScore = Infinity;
+      for (const c of candidates) {
+        const s = scoreMidPath([fx, fy, c, fy, c, ty, tx, ty], fromObj, toObj);
+        if (s < bestScore) { bestScore = s; bestMidX = c; }
+      }
+      points.push(bestMidX, fy);
+      points.push(bestMidX, ty);
+    } else {
+      points.push(fx, ty);
+    }
   }
 
   points.push(tx, ty);
   points.push(toPort.x, toPort.y);
 
   return points;
+}
+
+function segmentOverlapsObject(
+  x1: number, y1: number, x2: number, y2: number, obj: BoardObject,
+): boolean {
+  if (y1 === y2) {
+    // Horizontal segment
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    return y1 > obj.y && y1 < obj.y + obj.height && maxX > obj.x && minX < obj.x + obj.width;
+  }
+  if (x1 === x2) {
+    // Vertical segment
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
+    return x1 > obj.x && x1 < obj.x + obj.width && maxY > obj.y && minY < obj.y + obj.height;
+  }
+  return false;
+}
+
+function scoreMidPath(midPoints: number[], fromObj: BoardObject, toObj: BoardObject): number {
+  let score = 0;
+  for (let i = 2; i < midPoints.length; i += 2) {
+    score += Math.abs(midPoints[i] - midPoints[i - 2]) + Math.abs(midPoints[i + 1] - midPoints[i - 1]);
+  }
+  for (let i = 0; i < midPoints.length - 2; i += 2) {
+    if (segmentOverlapsObject(midPoints[i], midPoints[i + 1], midPoints[i + 2], midPoints[i + 3], fromObj)) score += 10000;
+    if (segmentOverlapsObject(midPoints[i], midPoints[i + 1], midPoints[i + 2], midPoints[i + 3], toObj)) score += 10000;
+  }
+  return score;
 }
 
 function getBestPortPair(from: BoardObject, to: BoardObject): { fromSide: Side; toSide: Side } {
@@ -141,8 +204,35 @@ function getBestPortPair(from: BoardObject, to: BoardObject): { fromSide: Side; 
       for (let i = 2; i < path.length; i += 2) {
         len += Math.abs(path[i] - path[i - 2]) + Math.abs(path[i + 1] - path[i - 1]);
       }
+      // Penalize paths whose segments cross through either object
+      for (let i = 0; i < path.length - 2; i += 2) {
+        if (segmentOverlapsObject(path[i], path[i + 1], path[i + 2], path[i + 3], from)) len += 10000;
+        if (segmentOverlapsObject(path[i], path[i + 1], path[i + 2], path[i + 3], to)) len += 10000;
+      }
       if (len < bestLen) { bestLen = len; best = { fromSide: fs, toSide: ts }; }
     }
+  }
+  return best;
+}
+
+function getBestSideFor(fixedSide: Side, fixedObj: BoardObject, otherObj: BoardObject, fixedIsFrom: boolean): Side {
+  const sides: Side[] = ["top", "right", "bottom", "left"];
+  let best: Side = "top";
+  let bestLen = Infinity;
+  for (const s of sides) {
+    const [fp, fs, tp, ts, fo, too] = fixedIsFrom
+      ? [getPortPosition(fixedObj, fixedSide), fixedSide, getPortPosition(otherObj, s), s, fixedObj, otherObj]
+      : [getPortPosition(otherObj, s), s, getPortPosition(fixedObj, fixedSide), fixedSide, otherObj, fixedObj];
+    const path = getOrthogonalPath(fp, fs, tp, ts, fo, too);
+    let len = 0;
+    for (let i = 2; i < path.length; i += 2) {
+      len += Math.abs(path[i] - path[i - 2]) + Math.abs(path[i + 1] - path[i - 1]);
+    }
+    for (let i = 0; i < path.length - 2; i += 2) {
+      if (segmentOverlapsObject(path[i], path[i + 1], path[i + 2], path[i + 3], fo)) len += 10000;
+      if (segmentOverlapsObject(path[i], path[i + 1], path[i + 2], path[i + 3], too)) len += 10000;
+    }
+    if (len < bestLen) { bestLen = len; best = s; }
   }
   return best;
 }
@@ -206,10 +296,10 @@ export default function ConnectorShape({
     toSide = storedTo;
   } else if (storedFrom) {
     fromSide = storedFrom;
-    toSide = getBestSide(toObj, fromObj);
+    toSide = getBestSideFor(storedFrom, fromObj, toObj, true);
   } else if (storedTo) {
-    fromSide = getBestSide(fromObj, toObj);
     toSide = storedTo;
+    fromSide = getBestSideFor(storedTo, toObj, fromObj, false);
   } else {
     ({ fromSide, toSide } = getBestPortPair(fromObj, toObj));
   }
