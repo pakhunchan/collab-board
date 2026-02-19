@@ -144,7 +144,7 @@ export default function Canvas({
       if (node === stage) return;
       const id = node.id();
       if (id) {
-        broadcastLiveMoveRef.current(id, node.x(), node.y());
+        broadcastLiveMoveRef.current(id, { x: node.x(), y: node.y() });
       }
     };
 
@@ -790,6 +790,21 @@ export default function Canvas({
                 height: size * signH,
                 rotation: newBox.rotation,
               };
+            }}
+          onTransform={() => {
+              const tr = transformerRef.current;
+              if (!tr) return;
+              for (const node of tr.nodes()) {
+                const id = node.id();
+                if (!id) continue;
+                broadcastLiveMoveRef.current(id, {
+                  x: node.x(),
+                  y: node.y(),
+                  width: Math.max(5, node.width() * Math.abs(node.scaleX())),
+                  height: Math.max(5, node.height() * Math.abs(node.scaleY())),
+                  rotation: node.rotation(),
+                });
+              }
             }}
           />
         </Layer>

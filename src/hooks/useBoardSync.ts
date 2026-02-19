@@ -492,7 +492,7 @@ export function useBoardSync(
 
   // Outgoing: broadcastLiveMove (throttled, broadcast-only — no store update, no DB write)
   const broadcastLiveMove = useCallback(
-    (id: string, x: number, y: number) => {
+    (id: string, changes: Partial<BoardObject>) => {
       if (!channelRef.current || !connectedRef.current) return;
 
       const send = () => {
@@ -503,7 +503,7 @@ export function useBoardSync(
           payload: {
             senderId: user?.uid || "",
             objectId: id,
-            changes: { x, y },
+            changes,
           },
         });
       };
