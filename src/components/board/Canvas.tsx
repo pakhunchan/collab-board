@@ -128,6 +128,8 @@ export default function Canvas({
   const setSelectedIds = useBoardStore((s) => s.setSelectedIds);
   const clearSelection = useBoardStore((s) => s.clearSelection);
 
+  const hasCircle = selectedIds.some((id) => objects[id]?.type === "circle");
+
   // Keep a stable ref to broadcastLiveMove so the native listener always calls the latest version
   const broadcastLiveMoveRef = useRef(broadcastLiveMove);
   broadcastLiveMoveRef.current = broadcastLiveMove;
@@ -229,11 +231,7 @@ export default function Canvas({
     // Enable aspect ratio lock if any selected object is a circle
     const hasCircle = selectedIds.some((id) => objects[id]?.type === "circle");
     tr.keepRatio(hasCircle);
-    tr.enabledAnchors(
-      hasCircle
-        ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
-        : ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left']
-    );
+    tr.enabledAnchors(['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left']);
 
     tr.nodes(nodes);
     tr.getLayer()?.batchDraw();
@@ -761,7 +759,37 @@ export default function Canvas({
             rotateEnabled={true}
             boundBoxFunc={(_oldBox, newBox) => {
               if (newBox.width < 5 || newBox.height < 5) return _oldBox;
-              return newBox;
+              if (!hasCircle) return newBox;
+
+              const absW = Math.abs(newBox.width);
+              const absH = Math.abs(newBox.height);
+              if (Math.abs(absW - absH) < 0.5) return newBox;
+
+              const oldAbsW = Math.abs(_oldBox.width);
+              const oldAbsH = Math.abs(_oldBox.height);
+              const wChanged = Math.abs(absW - oldAbsW) > 0.5;
+              const hChanged = Math.abs(absH - oldAbsH) > 0.5;
+
+              // Use the actively-dragged dimension as the leader;
+              // fall back to max for corner handles where both change.
+              const size =
+                wChanged && !hChanged
+                  ? absW
+                  : hChanged && !wChanged
+                    ? absH
+                    : Math.max(absW, absH);
+              const signW = Math.sign(newBox.width) || 1;
+              const signH = Math.sign(newBox.height) || 1;
+              const wGrow = size - absW;
+              const hGrow = size - absH;
+
+              return {
+                x: newBox.x - (wGrow / 2) * signW,
+                y: newBox.y - (hGrow / 2) * signH,
+                width: size * signW,
+                height: size * signH,
+                rotation: newBox.rotation,
+              };
             }}
           />
         </Layer>
