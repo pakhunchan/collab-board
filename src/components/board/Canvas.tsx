@@ -15,6 +15,8 @@ import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
 import FrameShape from "./FrameShape";
 import ConnectionDots, { type Side, getPortPosition, getDotPosition } from "./ConnectionDots";
+import SelectionBox from "./SelectionBox";
+import ColorPicker from "./ColorPicker";
 import Cursors from "./Cursors";
 
 function isInsideFrame(obj: BoardObject, frame: BoardObject): boolean {
@@ -134,6 +136,7 @@ export default function Canvas({
   const [scale, setScale] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const spaceHeld = useRef(false);
+  const shiftHeld = useRef(false);
   const isDraggingObject = useRef(false);
   const [drawingLine, setDrawingLine] = useState<{ startX: number; startY: number } | null>(null);
   const [drawingLineEnd, setDrawingLineEnd] = useState<{ x: number; y: number } | null>(null);
@@ -146,6 +149,10 @@ export default function Canvas({
   const [hoverTargetId, setHoverTargetId] = useState<string | null>(null);
   const [hoverPort, setHoverPort] = useState<Side | null>(null);
   const [nearbyTargetIds, setNearbyTargetIds] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<{startX: number; startY: number; endX: number; endY: number} | null>(null);
+  const selectionBoxRef = useRef(false);
+  const clipboard = useRef<BoardObject[]>([]);
+  const lastWorldPos = useRef({ x: 0, y: 0 });
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -306,6 +313,7 @@ export default function Canvas({
       // Ignore when editing text
       if (editingId) return;
 
+      if (e.key === "Shift") shiftHeld.current = true;
       if (e.code === "Space" && !e.repeat) {
         e.preventDefault();
         spaceHeld.current = true;
@@ -349,8 +357,64 @@ export default function Canvas({
         }
         [...ids, ...Array.from(connectorIds)].forEach((id) => broadcastDelete(id));
       }
+      // Ctrl+D: duplicate
+      if ((e.metaKey || e.ctrlKey) && e.key === "d") {
+        e.preventDefault();
+        const ids = useBoardStore.getState().selectedIds;
+        const newIds: string[] = [];
+        for (const id of ids) {
+          const obj = useBoardStore.getState().objects[id];
+          if (!obj || obj.type === "connector") continue;
+          const dup = broadcastCreate(obj.type, 0, 0, {
+            x: obj.x + 20,
+            y: obj.y + 20,
+            width: obj.width,
+            height: obj.height,
+            text: obj.text,
+            color: obj.color,
+            rotation: obj.rotation,
+            properties: { ...obj.properties },
+          });
+          newIds.push(dup.id);
+        }
+        if (newIds.length) setSelectedIds(newIds);
+      }
+      // Ctrl+C: copy
+      if ((e.metaKey || e.ctrlKey) && e.key === "c") {
+        const ids = useBoardStore.getState().selectedIds;
+        clipboard.current = ids
+          .map(id => useBoardStore.getState().objects[id])
+          .filter((o): o is BoardObject => !!o && o.type !== "connector");
+      }
+      // Ctrl+V: paste
+      if ((e.metaKey || e.ctrlKey) && e.key === "v") {
+        e.preventDefault();
+        if (!clipboard.current.length) return;
+        const xs = clipboard.current.map(o => o.x + o.width / 2);
+        const ys = clipboard.current.map(o => o.y + o.height / 2);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+        const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const dx = lastWorldPos.current.x - cx;
+        const dy = lastWorldPos.current.y - cy;
+        const newIds: string[] = [];
+        for (const obj of clipboard.current) {
+          const dup = broadcastCreate(obj.type, 0, 0, {
+            x: obj.x + dx,
+            y: obj.y + dy,
+            width: obj.width,
+            height: obj.height,
+            text: obj.text,
+            color: obj.color,
+            rotation: obj.rotation,
+            properties: { ...obj.properties },
+          });
+          newIds.push(dup.id);
+        }
+        if (newIds.length) setSelectedIds(newIds);
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftHeld.current = false;
       if (e.code === "Space") {
         spaceHeld.current = false;
         setIsPanning(false);
@@ -362,7 +426,7 @@ export default function Canvas({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [editingId, broadcastDelete, broadcastUpdate, broadcastConnectorPreview, broadcastShapePreview]);
+  }, [editingId, broadcastDelete, broadcastUpdate, broadcastCreate, setSelectedIds, broadcastConnectorPreview, broadcastShapePreview]);
 
   // Attach transformer to selected nodes
   useEffect(() => {
@@ -492,6 +556,16 @@ export default function Canvas({
           const worldY = (pointer.y - stagePos.y) / scale;
           setDrawingShape({ tool, startX: worldX, startY: worldY });
         }
+        if (tool === "select" && e.target === stageRef.current) {
+          const stage = stageRef.current;
+          if (!stage) return;
+          const pointer = stage.getPointerPosition();
+          if (!pointer) return;
+          const worldX = (pointer.x - stagePos.x) / scale;
+          const worldY = (pointer.y - stagePos.y) / scale;
+          setSelectionBox({ startX: worldX, startY: worldY, endX: worldX, endY: worldY });
+          selectionBoxRef.current = false;
+        }
       }
     },
     [stagePos, scale]
@@ -501,6 +575,31 @@ export default function Canvas({
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (e.evt.button === 1 && !spaceHeld.current) {
         setIsPanning(false);
+      }
+
+      // Drag-to-select: finish
+      if (e.evt.button === 0 && selectionBox) {
+        if (selectionBoxRef.current) {
+          const minX = Math.min(selectionBox.startX, selectionBox.endX);
+          const minY = Math.min(selectionBox.startY, selectionBox.endY);
+          const maxX = Math.max(selectionBox.startX, selectionBox.endX);
+          const maxY = Math.max(selectionBox.startY, selectionBox.endY);
+          const objs = useBoardStore.getState().objects;
+          const enclosed = Object.values(objs).filter(o => {
+            if (o.type === "connector") return false;
+            return o.x >= minX && o.y >= minY &&
+                   o.x + o.width <= maxX && o.y + o.height <= maxY;
+          }).map(o => o.id);
+          if (shiftHeld.current) {
+            const current = useBoardStore.getState().selectedIds;
+            const combined = new Set([...current, ...enclosed]);
+            setSelectedIds(Array.from(combined));
+          } else {
+            setSelectedIds(enclosed);
+          }
+          isDraggingObject.current = true;
+        }
+        setSelectionBox(null);
       }
 
       // Connection drag: finish
@@ -628,7 +727,7 @@ export default function Canvas({
         broadcastShapePreview(null);
       }
     },
-    [drawingLine, drawingShape, connectionDrag, hoverTargetId, hoverPort, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, broadcastConnectorPreview, setSelectedIds, setActiveTool]
+    [drawingLine, drawingShape, selectionBox, connectionDrag, hoverTargetId, hoverPort, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, broadcastConnectorPreview, setSelectedIds, setActiveTool]
   );
 
   // Handle object click when connector tool is active
@@ -761,6 +860,7 @@ export default function Canvas({
     if (!pointer) return;
     const worldX = (pointer.x - stagePos.x) / scale;
     const worldY = (pointer.y - stagePos.y) / scale;
+    lastWorldPos.current = { x: worldX, y: worldY };
     handleCursorMove(worldX, worldY);
     if (connectionDrag) {
       setConnectionDragPos({ x: worldX, y: worldY });
@@ -790,7 +890,11 @@ export default function Canvas({
       setConnectorPreview({ x: worldX, y: worldY });
       broadcastConnectorPreview({ fromId: connectingFrom, toX: worldX, toY: worldY });
     }
-  }, [stagePos, scale, handleCursorMove, connectionDrag, findNearestDotGlobal, broadcastConnectorPreview, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastShapePreview]);
+    if (selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, endX: worldX, endY: worldY } : null);
+      selectionBoxRef.current = true;
+    }
+  }, [stagePos, scale, handleCursorMove, connectionDrag, findNearestDotGlobal, broadcastConnectorPreview, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastShapePreview, selectionBox]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
@@ -837,7 +941,17 @@ export default function Canvas({
         <Layer>
           {sortedObjects.map((obj) => {
             const onSelect = () => {
-              if (!handleConnectorClick(obj.id)) setSelectedIds([obj.id]);
+              if (handleConnectorClick(obj.id)) return;
+              if (shiftHeld.current) {
+                const current = useBoardStore.getState().selectedIds;
+                if (current.includes(obj.id)) {
+                  setSelectedIds(current.filter(id => id !== obj.id));
+                } else {
+                  setSelectedIds([...current, obj.id]);
+                }
+              } else {
+                setSelectedIds([obj.id]);
+              }
             };
             return obj.type === "sticky" ? (
               <StickyNote
@@ -1043,6 +1157,15 @@ export default function Canvas({
               />
             );
           })}
+          {/* Selection box while drag-selecting */}
+          {selectionBox && selectionBoxRef.current && (
+            <SelectionBox
+              startX={selectionBox.startX}
+              startY={selectionBox.startY}
+              endX={selectionBox.endX}
+              endY={selectionBox.endY}
+            />
+          )}
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}
@@ -1218,6 +1341,18 @@ export default function Canvas({
           />
         );
       })()}
+
+      {/* Color picker for selected objects */}
+      {selectedIds.length > 0 && !editingId && (
+        <ColorPicker
+          currentColor={objects[selectedIds[0]]?.color}
+          onChange={(color) => {
+            for (const id of selectedIds) {
+              broadcastUpdate(id, { color });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
