@@ -46,6 +46,11 @@ export function useBoardSync(
   const [remoteConnectorPreviews, setRemoteConnectorPreviews] = useState<
     Record<string, { fromId: string; toX: number; toY: number }>
   >({});
+  const lastShapePreviewRef = useRef<number>(0);
+  const shapePreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [remoteShapePreviews, setRemoteShapePreviews] = useState<
+    Record<string, { tool: string; startX: number; startY: number; endX: number; endY: number }>
+  >({});
   const pendingBroadcasts = useRef<
     Array<{ event: string; payload: Record<string, unknown> }>
   >([]);
@@ -324,6 +329,28 @@ export function useBoardSync(
       }
     );
 
+    // Incoming: shape:preview — ephemeral shape drawing preview from another user
+    channel.on(
+      "broadcast",
+      { event: "shape:preview" },
+      (payload: {
+        payload: {
+          senderId: string;
+          preview: { tool: string; startX: number; startY: number; endX: number; endY: number } | null;
+        };
+      }) => {
+        const { senderId, preview } = payload.payload;
+        setRemoteShapePreviews((prev) => {
+          if (preview) {
+            return { ...prev, [senderId]: preview };
+          }
+          const next = { ...prev };
+          delete next[senderId];
+          return next;
+        });
+      }
+    );
+
     // Incoming: member:joined — new member accepted an invite
     channel.on(
       "broadcast",
@@ -580,5 +607,47 @@ export function useBoardSync(
     [user]
   );
 
-  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews };
+  // Outgoing: broadcastShapePreview (throttled, broadcast-only — ephemeral shape preview)
+  const broadcastShapePreview = useCallback(
+    (preview: { tool: string; startX: number; startY: number; endX: number; endY: number } | null) => {
+      if (!channelRef.current || !connectedRef.current) return;
+
+      const send = () => {
+        lastShapePreviewRef.current = Date.now();
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "shape:preview",
+          payload: {
+            senderId: user?.uid || "",
+            preview,
+          },
+        });
+      };
+
+      // Send clear immediately
+      if (!preview) {
+        if (shapePreviewTimerRef.current) {
+          clearTimeout(shapePreviewTimerRef.current);
+          shapePreviewTimerRef.current = null;
+        }
+        send();
+        return;
+      }
+
+      const elapsed = Date.now() - lastShapePreviewRef.current;
+      if (elapsed >= 50) {
+        if (shapePreviewTimerRef.current) {
+          clearTimeout(shapePreviewTimerRef.current);
+          shapePreviewTimerRef.current = null;
+        }
+        send();
+      } else {
+        if (shapePreviewTimerRef.current) clearTimeout(shapePreviewTimerRef.current);
+        shapePreviewTimerRef.current = setTimeout(send, 50 - elapsed);
+      }
+    },
+    [user]
+  );
+
+  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews, broadcastShapePreview, remoteShapePreviews };
 }

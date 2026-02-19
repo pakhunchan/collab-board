@@ -40,11 +40,17 @@ export default function CircleShape({
         const scaleY = node.scaleY();
         node.scaleX(1);
         node.scaleY(1);
+
+        // Force circles to maintain aspect ratio by using the larger dimension
+        const newWidth = Math.max(30, node.width() * scaleX);
+        const newHeight = Math.max(30, node.height() * scaleY);
+        const size = Math.max(newWidth, newHeight);
+
         onChange({
           x: node.x(),
           y: node.y(),
-          width: Math.max(30, node.width() * scaleX),
-          height: Math.max(30, node.height() * scaleY),
+          width: size,
+          height: size,
           rotation: node.rotation(),
         });
       }}

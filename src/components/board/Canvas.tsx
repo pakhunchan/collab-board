@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Circle, Arrow, Line as KonvaLine, Transformer } from "react-konva";
+import { Stage, Layer, Circle, Arrow, Line as KonvaLine, Rect as KonvaRect, Ellipse, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
 import { useCursors } from "@/hooks/useCursors";
@@ -13,6 +13,20 @@ import LineShape from "./LineShape";
 import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
 import Cursors from "./Cursors";
+
+const SHAPE_TOOLS = ["sticky", "rectangle", "circle", "text"] as const;
+type ShapeTool = (typeof SHAPE_TOOLS)[number];
+
+const SHAPE_PREVIEW_COLORS: Record<ShapeTool, string> = {
+  sticky: "#FFEB3B",
+  rectangle: "#90CAF9",
+  circle: "#CE93D8",
+  text: "#333333",
+};
+
+function isShapeTool(tool: string): tool is ShapeTool {
+  return (SHAPE_TOOLS as readonly string[]).includes(tool);
+}
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
@@ -91,6 +105,8 @@ export default function Canvas({
   const isDraggingObject = useRef(false);
   const [drawingLine, setDrawingLine] = useState<{ startX: number; startY: number } | null>(null);
   const [drawingLineEnd, setDrawingLineEnd] = useState<{ x: number; y: number } | null>(null);
+  const [drawingShape, setDrawingShape] = useState<{ tool: ShapeTool; startX: number; startY: number } | null>(null);
+  const [drawingShapeEnd, setDrawingShapeEnd] = useState<{ x: number; y: number } | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [connectorPreview, setConnectorPreview] = useState<{ x: number; y: number } | null>(null);
 
@@ -98,7 +114,7 @@ export default function Canvas({
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews, broadcastShapePreview, remoteShapePreviews } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -167,6 +183,9 @@ export default function Canvas({
         setConnectingFrom(null);
         setConnectorPreview(null);
         broadcastConnectorPreview(null);
+        setDrawingShape(null);
+        setDrawingShapeEnd(null);
+        broadcastShapePreview(null);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
         // Don't delete if an input/textarea is focused
@@ -194,7 +213,7 @@ export default function Canvas({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [editingId, broadcastDelete, broadcastConnectorPreview]);
+  }, [editingId, broadcastDelete, broadcastConnectorPreview, broadcastShapePreview]);
 
   // Attach transformer to selected nodes
   useEffect(() => {
@@ -206,6 +225,16 @@ export default function Canvas({
       .filter((id) => objects[id]?.type !== "connector")
       .map((id) => stage.findOne("#" + id))
       .filter(Boolean) as Konva.Node[];
+
+    // Enable aspect ratio lock if any selected object is a circle
+    const hasCircle = selectedIds.some((id) => objects[id]?.type === "circle");
+    tr.keepRatio(hasCircle);
+    tr.enabledAnchors(
+      hasCircle
+        ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+        : ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left']
+    );
+
     tr.nodes(nodes);
     tr.getLayer()?.batchDraw();
   }, [selectedIds, objects]);
@@ -267,6 +296,17 @@ export default function Canvas({
           const worldY = (pointer.y - stagePos.y) / scale;
           setDrawingLine({ startX: worldX, startY: worldY });
         }
+        if (isShapeTool(tool)) {
+          const stage = stageRef.current;
+          if (!stage) return;
+          const target = e.target;
+          if (target !== stage) return;
+          const pointer = stage.getPointerPosition();
+          if (!pointer) return;
+          const worldX = (pointer.x - stagePos.x) / scale;
+          const worldY = (pointer.y - stagePos.y) / scale;
+          setDrawingShape({ tool, startX: worldX, startY: worldY });
+        }
       }
     },
     [stagePos, scale]
@@ -306,8 +346,48 @@ export default function Canvas({
         setDrawingLineEnd(null);
         broadcastDrawPreview(null);
       }
+
+      // Shape tool: finish drawing
+      if (e.evt.button === 0 && drawingShape) {
+        const stage = stageRef.current;
+        if (!stage) return;
+        const pointer = stage.getPointerPosition();
+        if (!pointer) return;
+        const worldX = (pointer.x - stagePos.x) / scale;
+        const worldY = (pointer.y - stagePos.y) / scale;
+        const dx = Math.abs(worldX - drawingShape.startX);
+        const dy = Math.abs(worldY - drawingShape.startY);
+
+        let obj;
+        if (dx < 10 && dy < 10) {
+          // Tiny drag — create default-sized shape at click point
+          obj = broadcastCreate(drawingShape.tool, drawingShape.startX, drawingShape.startY);
+        } else {
+          // Real drag — compute bounding box
+          const bx = Math.min(drawingShape.startX, worldX);
+          const by = Math.min(drawingShape.startY, worldY);
+          let bw = Math.abs(worldX - drawingShape.startX);
+          let bh = Math.abs(worldY - drawingShape.startY);
+          if (drawingShape.tool === "circle") {
+            const size = Math.max(bw, bh);
+            bw = size;
+            bh = size;
+          }
+          const cx = bx + bw / 2;
+          const cy = by + bh / 2;
+          obj = broadcastCreate(drawingShape.tool, cx, cy);
+          broadcastUpdate(obj.id, { x: bx, y: by, width: bw, height: bh });
+        }
+
+        isDraggingObject.current = true;
+        setSelectedIds([obj.id]);
+        setActiveTool("select");
+        setDrawingShape(null);
+        setDrawingShapeEnd(null);
+        broadcastShapePreview(null);
+      }
     },
-    [drawingLine, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, setSelectedIds, setActiveTool]
+    [drawingLine, drawingShape, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, setSelectedIds, setActiveTool]
   );
 
   // Handle object click when connector tool is active
@@ -348,12 +428,6 @@ export default function Canvas({
 
       const stage = stageRef.current;
       if (!stage) return;
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-
-      // Convert to world coordinates
-      const worldX = (pointer.x - stagePos.x) / scale;
-      const worldY = (pointer.y - stagePos.y) / scale;
 
       const tool = useBoardStore.getState().activeTool;
 
@@ -367,13 +441,8 @@ export default function Canvas({
         return;
       }
 
-      if (tool === "sticky" || tool === "rectangle" || tool === "circle" || tool === "text") {
-        // Clicked on empty area → create object
-        if (e.target === stage) {
-          const obj = broadcastCreate(tool, worldX, worldY);
-          setSelectedIds([obj.id]);
-          setActiveTool("select");
-        }
+      if (isShapeTool(tool)) {
+        // Shape creation is handled in handleMouseUp
         return;
       }
 
@@ -384,7 +453,7 @@ export default function Canvas({
         }
       }
     },
-    [stagePos, scale, broadcastCreate, broadcastConnectorPreview, setSelectedIds, setActiveTool, clearSelection]
+    [broadcastConnectorPreview, clearSelection]
   );
 
   // Handle double-click on sticky note for inline text editing
@@ -439,11 +508,15 @@ export default function Canvas({
       setDrawingLineEnd({ x: worldX, y: worldY });
       broadcastDrawPreview({ startX: drawingLine.startX, startY: drawingLine.startY, endX: worldX, endY: worldY });
     }
+    if (drawingShape) {
+      setDrawingShapeEnd({ x: worldX, y: worldY });
+      broadcastShapePreview({ tool: drawingShape.tool, startX: drawingShape.startX, startY: drawingShape.startY, endX: worldX, endY: worldY });
+    }
     if (connectingFrom) {
       setConnectorPreview({ x: worldX, y: worldY });
       broadcastConnectorPreview({ fromId: connectingFrom, toX: worldX, toY: worldY });
     }
-  }, [stagePos, scale, handleCursorMove, drawingLine, broadcastDrawPreview, connectingFrom, broadcastConnectorPreview]);
+  }, [stagePos, scale, handleCursorMove, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastConnectorPreview, broadcastShapePreview]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
@@ -551,6 +624,46 @@ export default function Canvas({
               listening={false}
             />
           )}
+          {/* Preview shape while drawing */}
+          {drawingShape && drawingShapeEnd && (() => {
+            const bx = Math.min(drawingShape.startX, drawingShapeEnd.x);
+            const by = Math.min(drawingShape.startY, drawingShapeEnd.y);
+            const bw = Math.abs(drawingShapeEnd.x - drawingShape.startX);
+            const bh = Math.abs(drawingShapeEnd.y - drawingShape.startY);
+            const color = SHAPE_PREVIEW_COLORS[drawingShape.tool];
+            if (drawingShape.tool === "circle") {
+              const size = Math.max(bw, bh);
+              return (
+                <Ellipse
+                  x={bx + size / 2}
+                  y={by + size / 2}
+                  radiusX={size / 2}
+                  radiusY={size / 2}
+                  fill={color}
+                  opacity={0.3}
+                  stroke={color}
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                  listening={false}
+                />
+              );
+            }
+            return (
+              <KonvaRect
+                x={bx}
+                y={by}
+                width={bw}
+                height={bh}
+                fill={color}
+                opacity={0.3}
+                stroke={color}
+                strokeWidth={2}
+                dash={[6, 4]}
+                cornerRadius={drawingShape.tool === "sticky" ? 4 : 0}
+                listening={false}
+              />
+            );
+          })()}
           {/* Preview lines from remote users */}
           {Object.entries(remoteDrawPreviews).map(([uid, p]) => (
             <KonvaLine
@@ -563,6 +676,48 @@ export default function Canvas({
               listening={false}
             />
           ))}
+          {/* Preview shapes from remote users */}
+          {Object.entries(remoteShapePreviews).map(([uid, p]) => {
+            const bx = Math.min(p.startX, p.endX);
+            const by = Math.min(p.startY, p.endY);
+            const bw = Math.abs(p.endX - p.startX);
+            const bh = Math.abs(p.endY - p.startY);
+            const color = SHAPE_PREVIEW_COLORS[p.tool as ShapeTool] || "#999999";
+            if (p.tool === "circle") {
+              const size = Math.max(bw, bh);
+              return (
+                <Ellipse
+                  key={`shape-preview-${uid}`}
+                  x={bx + size / 2}
+                  y={by + size / 2}
+                  radiusX={size / 2}
+                  radiusY={size / 2}
+                  fill={color}
+                  opacity={0.2}
+                  stroke={color}
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                  listening={false}
+                />
+              );
+            }
+            return (
+              <KonvaRect
+                key={`shape-preview-${uid}`}
+                x={bx}
+                y={by}
+                width={bw}
+                height={bh}
+                fill={color}
+                opacity={0.2}
+                stroke={color}
+                strokeWidth={2}
+                dash={[6, 4]}
+                cornerRadius={p.tool === "sticky" ? 4 : 0}
+                listening={false}
+              />
+            );
+          })}
           {/* Preview arrow while connecting */}
           {connectingFrom && connectorPreview && objects[connectingFrom] && (() => {
             const src = objects[connectingFrom];
