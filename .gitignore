@@ -31,6 +31,7 @@ yarn-error.log*
 
 # notes
 lessons-learned.md
+potential_features.md
 
 # vercel
 .vercel
