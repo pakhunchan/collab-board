@@ -58,15 +58,15 @@ export default function FrameShape({
     >
       {/* Title text — positioned above the frame body */}
       <Text
-        x={TITLE_PADDING}
+        x={0}
         y={-TITLE_HEIGHT}
-        width={obj.width - TITLE_PADDING * 2}
+        width={obj.width}
         height={TITLE_HEIGHT}
+        padding={TITLE_PADDING}
         text={obj.text || "Frame"}
         fontSize={14}
         fontFamily="sans-serif"
         fill="#666666"
-        verticalAlign="bottom"
       />
       {/* Frame body — white background with subtle border */}
       <Rect

@@ -155,7 +155,7 @@ export default function Canvas({
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [textareaPos, setTextareaPos] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [textareaPos, setTextareaPos] = useState({ x: 0, y: 0, width: 0, height: 0, rotation: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeTool = useBoardStore((s) => s.activeTool);
@@ -706,23 +706,35 @@ export default function Canvas({
       const stage = stageRef.current;
       if (!stage) return;
 
-      // Calculate screen position of the object
-      const screenX = obj.x * scale + stagePos.x;
-      let screenY = obj.y * scale + stagePos.y;
-      let screenH = obj.height * scale;
-      const screenW = obj.width * scale;
+      // Use Konva's absolute transform to get exact screen position
+      const node = stage.findOne("#" + objId);
+      if (!node) return;
+      const absTransform = node.getAbsoluteTransform();
+      const rotation = obj.rotation || 0;
+
+      let localY = 0;
+      let h = obj.height;
       if (obj.type === "frame") {
-        screenY -= FRAME_TITLE_HEIGHT * scale;
-        screenH = FRAME_TITLE_HEIGHT * scale;
+        localY = -FRAME_TITLE_HEIGHT;
+        h = FRAME_TITLE_HEIGHT;
       }
 
+      // Transform local top-left point to screen coordinates
+      const screenPos = absTransform.point({ x: 0, y: localY });
+
       setEditingId(objId);
-      setTextareaPos({ x: screenX, y: screenY, width: screenW, height: screenH });
+      setTextareaPos({
+        x: screenPos.x,
+        y: screenPos.y,
+        width: obj.width * scale,
+        height: h * scale,
+        rotation,
+      });
 
       // Focus textarea after render
       setTimeout(() => textareaRef.current?.focus(), 0);
     },
-    [scale, stagePos]
+    [scale]
   );
 
   const handleTextareaBlur = useCallback(() => {
@@ -1189,13 +1201,17 @@ export default function Canvas({
               fontFamily: "sans-serif",
               color: isFrame ? "#666666" : "#333",
               background: "transparent",
-              border: isFrame ? "none" : "2px solid #1a73e8",
+              border: "none",
+              margin: 0,
               borderRadius: isFrame ? "0" : `${4 * scale}px`,
-              outline: "none",
+              outline: isFrame ? "none" : "2px solid #1a73e8",
+              lineHeight: "1",
               resize: "none",
               overflow: "hidden",
               zIndex: 10,
               boxSizing: "border-box",
+              transform: `rotate(${textareaPos.rotation}deg)`,
+              transformOrigin: "0 0",
             }}
           />
         );
