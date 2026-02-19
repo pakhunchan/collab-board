@@ -12,7 +12,6 @@ interface LineShapeProps {
 
 export default function LineShape({
   obj,
-  isSelected,
   onSelect,
   onChange,
 }: LineShapeProps) {
@@ -25,7 +24,7 @@ export default function LineShape({
       x={obj.x}
       y={obj.y}
       points={[0, 0, obj.width, obj.height]}
-      stroke={isSelected ? "#1a73e8" : obj.color}
+      stroke={obj.color}
       strokeWidth={3}
       hitStrokeWidth={20}
       rotation={obj.rotation}

@@ -357,28 +357,6 @@ export default function Canvas({
         }
         [...ids, ...Array.from(connectorIds)].forEach((id) => broadcastDelete(id));
       }
-      // Ctrl+D: duplicate
-      if ((e.metaKey || e.ctrlKey) && e.key === "d") {
-        e.preventDefault();
-        const ids = useBoardStore.getState().selectedIds;
-        const newIds: string[] = [];
-        for (const id of ids) {
-          const obj = useBoardStore.getState().objects[id];
-          if (!obj || obj.type === "connector") continue;
-          const dup = broadcastCreate(obj.type, 0, 0, {
-            x: obj.x + 20,
-            y: obj.y + 20,
-            width: obj.width,
-            height: obj.height,
-            text: obj.text,
-            color: obj.color,
-            rotation: obj.rotation,
-            properties: { ...obj.properties },
-          });
-          newIds.push(dup.id);
-        }
-        if (newIds.length) setSelectedIds(newIds);
-      }
       // Ctrl+C: copy
       if ((e.metaKey || e.ctrlKey) && e.key === "c") {
         const ids = useBoardStore.getState().selectedIds;
