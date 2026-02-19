@@ -910,17 +910,25 @@ export default function Canvas({
               for (const node of tr.nodes()) {
                 const id = node.id();
                 if (!id) continue;
+                const w = Math.max(5, node.width() * Math.abs(node.scaleX()));
+                const h = Math.max(5, node.height() * Math.abs(node.scaleY()));
                 broadcastLiveMoveRef.current(id, {
                   x: node.x(),
                   y: node.y(),
-                  width: Math.max(5, node.width() * Math.abs(node.scaleX())),
-                  height: Math.max(5, node.height() * Math.abs(node.scaleY())),
+                  width: w,
+                  height: h,
                   rotation: node.rotation(),
                 });
-                // Update local store with x/y/rotation only (skip width/height to avoid double-scale)
+                // Reset node scale and apply real dimensions to avoid double-scale
+                node.scaleX(node.scaleX() > 0 ? 1 : -1);
+                node.scaleY(node.scaleY() > 0 ? 1 : -1);
+                node.width(w);
+                node.height(h);
                 useBoardStore.getState().applyRemoteUpdate(id, {
                   x: node.x(),
                   y: node.y(),
+                  width: w,
+                  height: h,
                   rotation: node.rotation(),
                 });
               }
