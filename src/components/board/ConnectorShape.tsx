@@ -52,6 +52,8 @@ function getOrthogonalPath(
   fromSide: Side,
   toPort: { x: number; y: number },
   toSide: Side,
+  fromObj?: BoardObject,
+  toObj?: BoardObject,
 ): number[] {
   const PAD = 20;
   const points: number[] = [fromPort.x, fromPort.y];
@@ -75,11 +77,43 @@ function getOrthogonalPath(
   const toH = toSide === "left" || toSide === "right";
 
   if (fromH && toH) {
-    const midX = (fx + tx) / 2;
+    let midX = (fx + tx) / 2;
+    if (fromObj && toObj) {
+      if (fromSide === toSide) {
+        if (fromSide === "right") {
+          midX = Math.max(fromObj.x + fromObj.width, toObj.x + toObj.width) + PAD;
+        } else {
+          midX = Math.min(fromObj.x, toObj.x) - PAD;
+        }
+      } else {
+        if (midX > fromObj.x && midX < fromObj.x + fromObj.width) {
+          midX = fromSide === "right" ? fromObj.x + fromObj.width + PAD : fromObj.x - PAD;
+        }
+        if (midX > toObj.x && midX < toObj.x + toObj.width) {
+          midX = toSide === "right" ? toObj.x + toObj.width + PAD : toObj.x - PAD;
+        }
+      }
+    }
     points.push(midX, fy);
     points.push(midX, ty);
   } else if (!fromH && !toH) {
-    const midY = (fy + ty) / 2;
+    let midY = (fy + ty) / 2;
+    if (fromObj && toObj) {
+      if (fromSide === toSide) {
+        if (fromSide === "bottom") {
+          midY = Math.max(fromObj.y + fromObj.height, toObj.y + toObj.height) + PAD;
+        } else {
+          midY = Math.min(fromObj.y, toObj.y) - PAD;
+        }
+      } else {
+        if (midY > fromObj.y && midY < fromObj.y + fromObj.height) {
+          midY = fromSide === "bottom" ? fromObj.y + fromObj.height + PAD : fromObj.y - PAD;
+        }
+        if (midY > toObj.y && midY < toObj.y + toObj.height) {
+          midY = toSide === "bottom" ? toObj.y + toObj.height + PAD : toObj.y - PAD;
+        }
+      }
+    }
     points.push(fx, midY);
     points.push(tx, midY);
   } else if (fromH) {
@@ -92,6 +126,25 @@ function getOrthogonalPath(
   points.push(toPort.x, toPort.y);
 
   return points;
+}
+
+function getBestPortPair(from: BoardObject, to: BoardObject): { fromSide: Side; toSide: Side } {
+  const sides: Side[] = ["top", "right", "bottom", "left"];
+  let best = { fromSide: "right" as Side, toSide: "left" as Side };
+  let bestLen = Infinity;
+  for (const fs of sides) {
+    const fp = getPortPosition(from, fs);
+    for (const ts of sides) {
+      const tp = getPortPosition(to, ts);
+      const path = getOrthogonalPath(fp, fs, tp, ts, from, to);
+      let len = 0;
+      for (let i = 2; i < path.length; i += 2) {
+        len += Math.abs(path[i] - path[i - 2]) + Math.abs(path[i + 1] - path[i - 1]);
+      }
+      if (len < bestLen) { bestLen = len; best = { fromSide: fs, toSide: ts }; }
+    }
+  }
+  return best;
 }
 
 export default function ConnectorShape({
@@ -145,13 +198,25 @@ export default function ConnectorShape({
   const toObj = objects[toId];
   if (!toObj) return null;
 
-  const fromSide = (obj.properties.fromPort as Side) || getBestSide(fromObj, toObj);
-  const toSide = (obj.properties.toPort as Side) || getBestSide(toObj, fromObj);
+  let fromSide: Side, toSide: Side;
+  const storedFrom = obj.properties.fromPort as Side | undefined;
+  const storedTo = obj.properties.toPort as Side | undefined;
+  if (storedFrom && storedTo) {
+    fromSide = storedFrom;
+    toSide = storedTo;
+  } else if (storedFrom) {
+    fromSide = storedFrom;
+    toSide = getBestSide(toObj, fromObj);
+  } else if (storedTo) {
+    fromSide = getBestSide(fromObj, toObj);
+    toSide = storedTo;
+  } else {
+    ({ fromSide, toSide } = getBestPortPair(fromObj, toObj));
+  }
 
   const fromPort = getPortPosition(fromObj, fromSide);
   const toPort = getPortPosition(toObj, toSide);
-
-  const points = getOrthogonalPath(fromPort, fromSide, toPort, toSide);
+  const points = getOrthogonalPath(fromPort, fromSide, toPort, toSide, fromObj, toObj);
 
   return (
     <Arrow
