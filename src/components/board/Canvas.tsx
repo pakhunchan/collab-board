@@ -12,7 +12,7 @@ import CircleShape from "./CircleShape";
 import LineShape from "./LineShape";
 import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
-import ConnectionDots, { type Side, getPortPosition } from "./ConnectionDots";
+import ConnectionDots, { type Side, getPortPosition, getDotPosition } from "./ConnectionDots";
 import Cursors from "./Cursors";
 
 const SHAPE_TOOLS = ["sticky", "rectangle", "circle", "text"] as const;
@@ -248,39 +248,38 @@ export default function Canvas({
     tr.getLayer()?.batchDraw();
   }, [selectedIds, objects]);
 
-  // Hit-test: find which non-connector object contains the point (excluding a given id)
-  const findObjectAtPoint = useCallback(
-    (x: number, y: number, excludeId: string): import("@/types/board").BoardObject | null => {
+  // Find the nearest connection dot across ALL objects (excluding a given id)
+  const findNearestDotGlobal = useCallback(
+    (x: number, y: number, s: number, excludeId: string): { objectId: string; port: Side } | null => {
       const objs = useBoardStore.getState().objects;
+      const threshold = 30 / s;
+      let best: { objectId: string; port: Side } | null = null;
+      let bestDist = Infinity;
+      const sides: Side[] = ["top", "right", "bottom", "left"];
       for (const obj of Object.values(objs)) {
         if (obj.id === excludeId || obj.type === "connector") continue;
-        if (x >= obj.x && x <= obj.x + obj.width && y >= obj.y && y <= obj.y + obj.height) {
-          return obj;
-        }
-      }
-      return null;
-    },
-    []
-  );
-
-  // Find the nearest port on an object to a point; return the side if within ~20px threshold
-  const findNearestPort = useCallback(
-    (obj: import("@/types/board").BoardObject, x: number, y: number, s: number): Side | null => {
-      const sides: Side[] = ["top", "right", "bottom", "left"];
-      const threshold = 20 / s;
-      let best: Side | null = null;
-      let bestDist = Infinity;
-      for (const side of sides) {
-        const p = getPortPosition(obj, side);
-        const dist = Math.hypot(p.x - x, p.y - y);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = side;
+        for (const side of sides) {
+          const p = getDotPosition(obj, side);
+          const dist = Math.hypot(p.x - x, p.y - y);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { objectId: obj.id, port: side };
+          }
         }
       }
       return bestDist <= threshold ? best : null;
     },
     []
+  );
+
+  // Reconnect handler: delete old connector and start a new connection drag from same source
+  const handleReconnect = useCallback(
+    (connectorId: string, fromId: string, fromPort: Side) => {
+      broadcastDelete(connectorId);
+      clearSelection();
+      setConnectionDrag({ fromId, fromPort });
+    },
+    [broadcastDelete, clearSelection]
   );
 
   const handleWheel = useCallback(
@@ -591,11 +590,11 @@ export default function Canvas({
     handleCursorMove(worldX, worldY);
     if (connectionDrag) {
       setConnectionDragPos({ x: worldX, y: worldY });
-      // Hit-test for hover target
-      const target = findObjectAtPoint(worldX, worldY, connectionDrag.fromId);
-      if (target) {
-        setHoverTargetId(target.id);
-        setHoverPort(findNearestPort(target, worldX, worldY, scale));
+      // Hit-test for nearest dot across all objects
+      const nearest = findNearestDotGlobal(worldX, worldY, scale, connectionDrag.fromId);
+      if (nearest) {
+        setHoverTargetId(nearest.objectId);
+        setHoverPort(nearest.port);
       } else {
         setHoverTargetId(null);
         setHoverPort(null);
@@ -616,7 +615,7 @@ export default function Canvas({
       setConnectorPreview({ x: worldX, y: worldY });
       broadcastConnectorPreview({ fromId: connectingFrom, toX: worldX, toY: worldY });
     }
-  }, [stagePos, scale, handleCursorMove, connectionDrag, findObjectAtPoint, findNearestPort, broadcastConnectorPreview, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastShapePreview]);
+  }, [stagePos, scale, handleCursorMove, connectionDrag, findNearestDotGlobal, broadcastConnectorPreview, drawingLine, broadcastDrawPreview, drawingShape, connectingFrom, broadcastShapePreview]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
@@ -680,6 +679,7 @@ export default function Canvas({
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
                 onSelect={() => setSelectedIds([obj.id])}
+                onReconnect={handleReconnect}
               />
             ) : obj.type === "circle" ? (
               <CircleShape
@@ -930,15 +930,19 @@ export default function Canvas({
                 }}
               />
             ))}
-          {/* Connection dots on hover target during drag */}
-          {connectionDrag && hoverTargetId && objects[hoverTargetId] && (
-            <ConnectionDots
-              obj={objects[hoverTargetId]}
-              scale={scale}
-              variant="target"
-              highlightedPort={hoverPort}
-            />
-          )}
+          {/* Connection dots on ALL potential targets during drag */}
+          {connectionDrag &&
+            Object.values(objects)
+              .filter((o) => o.type !== "connector" && o.id !== connectionDrag.fromId)
+              .map((o) => (
+                <ConnectionDots
+                  key={`target-dots-${o.id}`}
+                  obj={o}
+                  scale={scale}
+                  variant="target"
+                  highlightedPort={hoverTargetId === o.id ? hoverPort : null}
+                />
+              ))}
           {/* Preview arrow during connection drag */}
           {connectionDrag && connectionDragPos && objects[connectionDrag.fromId] && (() => {
             const fromPortPos = getPortPosition(objects[connectionDrag.fromId], connectionDrag.fromPort);

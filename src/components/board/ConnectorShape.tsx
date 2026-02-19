@@ -6,13 +6,30 @@ interface ConnectorShapeProps {
   obj: BoardObject;
   isSelected: boolean;
   onSelect: () => void;
+  onReconnect?: (connectorId: string, fromId: string, fromPort: Side) => void;
 }
 
 type Side = "top" | "right" | "bottom" | "left";
 
+function rotatePoint(px: number, py: number, ox: number, oy: number, deg: number) {
+  if (deg === 0) return { x: px, y: py };
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = px - ox;
+  const dy = py - oy;
+  return { x: ox + dx * cos - dy * sin, y: oy + dx * sin + dy * cos };
+}
+
+function getCenter(obj: BoardObject) {
+  return rotatePoint(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.x, obj.y, obj.rotation);
+}
+
 function getBestSide(from: BoardObject, to: BoardObject): Side {
-  const dx = (to.x + to.width / 2) - (from.x + from.width / 2);
-  const dy = (to.y + to.height / 2) - (from.y + from.height / 2);
+  const fc = getCenter(from);
+  const tc = getCenter(to);
+  const dx = tc.x - fc.x;
+  const dy = tc.y - fc.y;
   if (Math.abs(dx) > Math.abs(dy)) {
     return dx > 0 ? "right" : "left";
   }
@@ -20,12 +37,14 @@ function getBestSide(from: BoardObject, to: BoardObject): Side {
 }
 
 function getPortPosition(obj: BoardObject, side: Side) {
+  let pos;
   switch (side) {
-    case "top":    return { x: obj.x + obj.width / 2, y: obj.y };
-    case "right":  return { x: obj.x + obj.width, y: obj.y + obj.height / 2 };
-    case "bottom": return { x: obj.x + obj.width / 2, y: obj.y + obj.height };
-    case "left":   return { x: obj.x, y: obj.y + obj.height / 2 };
+    case "top":    pos = { x: obj.x + obj.width / 2, y: obj.y }; break;
+    case "right":  pos = { x: obj.x + obj.width, y: obj.y + obj.height / 2 }; break;
+    case "bottom": pos = { x: obj.x + obj.width / 2, y: obj.y + obj.height }; break;
+    case "left":   pos = { x: obj.x, y: obj.y + obj.height / 2 }; break;
   }
+  return rotatePoint(pos.x, pos.y, obj.x, obj.y, obj.rotation);
 }
 
 function getOrthogonalPath(
@@ -79,6 +98,7 @@ export default function ConnectorShape({
   obj,
   isSelected,
   onSelect,
+  onReconnect,
 }: ConnectorShapeProps) {
   const objects = useBoardStore((s) => s.objects);
 
@@ -109,6 +129,11 @@ export default function ConnectorShape({
         fill={color}
         draggable={false}
         hitStrokeWidth={20}
+        onMouseDown={(e) => {
+          if (e.evt.button !== 0) return;
+          e.cancelBubble = true;
+          onReconnect?.(obj.id, fromId, fromSide);
+        }}
         onClick={onSelect}
         onTap={onSelect}
       />
