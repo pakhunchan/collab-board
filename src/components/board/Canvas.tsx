@@ -114,6 +114,7 @@ export default function Canvas({
   const [connectionDragPos, setConnectionDragPos] = useState<{ x: number; y: number } | null>(null);
   const [hoverTargetId, setHoverTargetId] = useState<string | null>(null);
   const [hoverPort, setHoverPort] = useState<Side | null>(null);
+  const [nearbyTargetIds, setNearbyTargetIds] = useState<string[]>([]);
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -199,6 +200,7 @@ export default function Canvas({
         setConnectionDragPos(null);
         setHoverTargetId(null);
         setHoverPort(null);
+        setNearbyTargetIds([]);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
         // Don't delete if an input/textarea is focused
@@ -250,24 +252,30 @@ export default function Canvas({
 
   // Find the nearest connection dot across ALL objects (excluding a given id)
   const findNearestDotGlobal = useCallback(
-    (x: number, y: number, s: number, excludeId: string): { objectId: string; port: Side } | null => {
+    (x: number, y: number, s: number, excludeId: string):
+      { nearest: { objectId: string; port: Side } | null; nearbyIds: string[] } => {
       const objs = useBoardStore.getState().objects;
-      const threshold = 30 / s;
+      const snapThreshold = 30 / s;
+      const showThreshold = 100 / s;
       let best: { objectId: string; port: Side } | null = null;
       let bestDist = Infinity;
+      const nearby: string[] = [];
       const sides: Side[] = ["top", "right", "bottom", "left"];
       for (const obj of Object.values(objs)) {
         if (obj.id === excludeId || obj.type === "connector") continue;
+        let minDist = Infinity;
         for (const side of sides) {
           const p = getDotPosition(obj, side);
           const dist = Math.hypot(p.x - x, p.y - y);
-          if (dist < bestDist) {
-            bestDist = dist;
-            best = { objectId: obj.id, port: side };
-          }
+          if (dist < minDist) { minDist = dist; }
+          if (dist < bestDist) { bestDist = dist; best = { objectId: obj.id, port: side }; }
         }
+        if (minDist <= showThreshold) nearby.push(obj.id);
       }
-      return bestDist <= threshold ? best : null;
+      return {
+        nearest: bestDist <= snapThreshold ? best : null,
+        nearbyIds: nearby,
+      };
     },
     []
   );
@@ -397,6 +405,7 @@ export default function Canvas({
         setConnectionDragPos(null);
         setHoverTargetId(null);
         setHoverPort(null);
+        setNearbyTargetIds([]);
         broadcastConnectorPreview(null);
         isDraggingObject.current = true;
         return;
@@ -591,7 +600,8 @@ export default function Canvas({
     if (connectionDrag) {
       setConnectionDragPos({ x: worldX, y: worldY });
       // Hit-test for nearest dot across all objects
-      const nearest = findNearestDotGlobal(worldX, worldY, scale, connectionDrag.fromId);
+      const { nearest, nearbyIds } = findNearestDotGlobal(worldX, worldY, scale, connectionDrag.fromId);
+      setNearbyTargetIds(nearbyIds);
       if (nearest) {
         setHoverTargetId(nearest.objectId);
         setHoverPort(nearest.port);
@@ -930,10 +940,10 @@ export default function Canvas({
                 }}
               />
             ))}
-          {/* Connection dots on ALL potential targets during drag */}
+          {/* Connection dots on nearby potential targets during drag */}
           {connectionDrag &&
             Object.values(objects)
-              .filter((o) => o.type !== "connector" && o.id !== connectionDrag.fromId)
+              .filter((o) => o.type !== "connector" && o.id !== connectionDrag.fromId && nearbyTargetIds.includes(o.id))
               .map((o) => (
                 <ConnectionDots
                   key={`target-dots-${o.id}`}
