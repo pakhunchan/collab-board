@@ -144,7 +144,9 @@ export default function Canvas({
       if (node === stage) return;
       const id = node.id();
       if (id) {
-        broadcastLiveMoveRef.current(id, { x: node.x(), y: node.y() });
+        const changes = { x: node.x(), y: node.y() };
+        useBoardStore.getState().applyRemoteUpdate(id, changes);
+        broadcastLiveMoveRef.current(id, changes);
       }
     };
 
@@ -802,6 +804,12 @@ export default function Canvas({
                   y: node.y(),
                   width: Math.max(5, node.width() * Math.abs(node.scaleX())),
                   height: Math.max(5, node.height() * Math.abs(node.scaleY())),
+                  rotation: node.rotation(),
+                });
+                // Update local store with x/y/rotation only (skip width/height to avoid double-scale)
+                useBoardStore.getState().applyRemoteUpdate(id, {
+                  x: node.x(),
+                  y: node.y(),
                   rotation: node.rotation(),
                 });
               }
