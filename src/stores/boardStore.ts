@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { BoardObject, BoardObjectType } from "@/types/board";
 
-export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text";
+export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text" | "connector";
 
 const DEFAULT_COLORS: Record<BoardObjectType, string> = {
   sticky: "#FFEB3B",
@@ -9,6 +9,7 @@ const DEFAULT_COLORS: Record<BoardObjectType, string> = {
   circle: "#CE93D8",
   line: "#666666",
   text: "#333333",
+  connector: "#666666",
 };
 
 const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> = {
@@ -17,6 +18,7 @@ const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> 
   circle: { width: 160, height: 160 },
   line: { width: 200, height: 0 },
   text: { width: 200, height: 40 },
+  connector: { width: 0, height: 0 },
 };
 
 interface BoardStore {
@@ -38,6 +40,9 @@ interface BoardStore {
   // Persistence
   loadObjects: (objects: BoardObject[]) => void;
   reconcileObjects: (remoteObjects: BoardObject[]) => BoardObject[];
+
+  // Connectors
+  getConnectorsForObject: (objectId: string) => string[];
 
   // Selection
   selectedIds: string[];
@@ -157,6 +162,12 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
     set({ objects: merged });
     return localOnly;
+  },
+
+  getConnectorsForObject: (objectId) => {
+    return Object.values(get().objects)
+      .filter((o) => o.type === "connector" && (o.properties.fromId === objectId || o.properties.toId === objectId))
+      .map((o) => o.id);
   },
 
   selectedIds: [],

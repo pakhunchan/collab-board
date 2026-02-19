@@ -6,7 +6,7 @@ export interface Board {
   updatedAt: number;
 }
 
-export type BoardObjectType = "sticky" | "rectangle" | "circle" | "line" | "text";
+export type BoardObjectType = "sticky" | "rectangle" | "circle" | "line" | "text" | "connector";
 
 export interface BoardObject {
   id: string;

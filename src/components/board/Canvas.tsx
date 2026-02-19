@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Circle, Transformer } from "react-konva";
+import { Stage, Layer, Circle, Arrow, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
 import { useCursors } from "@/hooks/useCursors";
@@ -11,6 +11,7 @@ import RectShape from "./RectShape";
 import CircleShape from "./CircleShape";
 import LineShape from "./LineShape";
 import TextShape from "./TextShape";
+import ConnectorShape from "./ConnectorShape";
 import Cursors from "./Cursors";
 
 const MIN_SCALE = 0.1;
@@ -89,6 +90,8 @@ export default function Canvas({
   const spaceHeld = useRef(false);
   const isDraggingObject = useRef(false);
   const [drawingLine, setDrawingLine] = useState<{ startX: number; startY: number } | null>(null);
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  const [connectorPreview, setConnectorPreview] = useState<{ x: number; y: number } | null>(null);
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -159,12 +162,22 @@ export default function Canvas({
         spaceHeld.current = true;
         setIsPanning(true);
       }
+      if (e.key === "Escape") {
+        setConnectingFrom(null);
+        setConnectorPreview(null);
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
         // Don't delete if an input/textarea is focused
         const tag = (e.target as HTMLElement).tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
         const ids = useBoardStore.getState().selectedIds;
-        ids.forEach((id) => broadcastDelete(id));
+        const connectorIds = new Set<string>();
+        for (const id of ids) {
+          for (const cid of useBoardStore.getState().getConnectorsForObject(id)) {
+            connectorIds.add(cid);
+          }
+        }
+        [...ids, ...Array.from(connectorIds)].forEach((id) => broadcastDelete(id));
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -188,6 +201,7 @@ export default function Canvas({
     if (!tr || !stage) return;
 
     const nodes = selectedIds
+      .filter((id) => objects[id]?.type !== "connector")
       .map((id) => stage.findOne("#" + id))
       .filter(Boolean) as Konva.Node[];
     tr.nodes(nodes);
@@ -292,6 +306,29 @@ export default function Canvas({
     [drawingLine, stagePos, scale, broadcastCreate, broadcastUpdate, setSelectedIds, setActiveTool]
   );
 
+  // Handle object click when connector tool is active
+  const handleConnectorClick = useCallback(
+    (objId: string): boolean => {
+      if (useBoardStore.getState().activeTool !== "connector") return false;
+      const obj = useBoardStore.getState().objects[objId];
+      if (!obj || obj.type === "connector") return false;
+
+      if (connectingFrom === null) {
+        setConnectingFrom(objId);
+        return true;
+      }
+      if (connectingFrom === objId) return true;
+
+      const c = broadcastCreate("connector", 0, 0);
+      broadcastUpdate(c.id, { properties: { fromId: connectingFrom, toId: objId } });
+      setConnectingFrom(null);
+      setConnectorPreview(null);
+      setActiveTool("select");
+      return true;
+    },
+    [connectingFrom, broadcastCreate, broadcastUpdate, setActiveTool]
+  );
+
   // Click on stage: create objects or clear selection
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -314,6 +351,15 @@ export default function Canvas({
       const worldY = (pointer.y - stagePos.y) / scale;
 
       const tool = useBoardStore.getState().activeTool;
+
+      if (tool === "connector") {
+        // Click on empty canvas cancels connector creation
+        if (e.target === stage) {
+          setConnectingFrom(null);
+          setConnectorPreview(null);
+        }
+        return;
+      }
 
       if (tool === "sticky" || tool === "rectangle" || tool === "circle" || tool === "text") {
         // Clicked on empty area → create object
@@ -383,11 +429,14 @@ export default function Canvas({
     const worldX = (pointer.x - stagePos.x) / scale;
     const worldY = (pointer.y - stagePos.y) / scale;
     handleCursorMove(worldX, worldY);
-  }, [stagePos, scale, handleCursorMove]);
+    if (connectingFrom) {
+      setConnectorPreview({ x: worldX, y: worldY });
+    }
+  }, [stagePos, scale, handleCursorMove, connectingFrom]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
-    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text") return "crosshair";
+    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text" || activeTool === "connector") return "crosshair";
     return "default";
   };
 
@@ -427,22 +476,32 @@ export default function Canvas({
           />
         </Layer>
         <Layer>
-          {sortedObjects.map((obj) =>
-            obj.type === "sticky" ? (
+          {sortedObjects.map((obj) => {
+            const onSelect = () => {
+              if (!handleConnectorClick(obj.id)) setSelectedIds([obj.id]);
+            };
+            return obj.type === "sticky" ? (
               <StickyNote
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
-                onSelect={() => setSelectedIds([obj.id])}
+                onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
+              />
+            ) : obj.type === "connector" ? (
+              <ConnectorShape
+                key={obj.id}
+                obj={obj}
+                isSelected={selectedIds.includes(obj.id)}
+                onSelect={() => setSelectedIds([obj.id])}
               />
             ) : obj.type === "circle" ? (
               <CircleShape
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
-                onSelect={() => setSelectedIds([obj.id])}
+                onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
               />
             ) : obj.type === "line" ? (
@@ -450,7 +509,7 @@ export default function Canvas({
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
-                onSelect={() => setSelectedIds([obj.id])}
+                onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
               />
             ) : obj.type === "text" ? (
@@ -458,7 +517,7 @@ export default function Canvas({
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
-                onSelect={() => setSelectedIds([obj.id])}
+                onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
               />
@@ -467,11 +526,30 @@ export default function Canvas({
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
-                onSelect={() => setSelectedIds([obj.id])}
+                onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
               />
-            )
-          )}
+            );
+          })}
+          {/* Preview arrow while connecting */}
+          {connectingFrom && connectorPreview && objects[connectingFrom] && (() => {
+            const src = objects[connectingFrom];
+            const fromX = src.x + src.width / 2;
+            const fromY = src.y + src.height / 2;
+            return (
+              <Arrow
+                points={[fromX, fromY, connectorPreview.x, connectorPreview.y]}
+                stroke="#1a73e8"
+                strokeWidth={2}
+                pointerLength={10}
+                pointerWidth={8}
+                fill="#1a73e8"
+                dash={[8, 4]}
+                listening={false}
+                opacity={0.6}
+              />
+            );
+          })()}
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}
@@ -485,6 +563,29 @@ export default function Canvas({
           <Cursors remoteCursors={remoteCursors} scale={scale} />
         </Layer>
       </Stage>
+
+      {/* Connector hint */}
+      {activeTool === "connector" && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "6px 16px",
+            background: "rgba(0,0,0,0.75)",
+            color: "#fff",
+            borderRadius: 6,
+            fontSize: 13,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        >
+          {connectingFrom
+            ? "Click a second object to connect — Esc to cancel"
+            : "Click an object to start a connection"}
+        </div>
+      )}
 
       {/* Inline text editing overlay */}
       {editingId && (
