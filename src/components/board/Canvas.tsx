@@ -98,7 +98,7 @@ export default function Canvas({
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -166,6 +166,7 @@ export default function Canvas({
       if (e.key === "Escape") {
         setConnectingFrom(null);
         setConnectorPreview(null);
+        broadcastConnectorPreview(null);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
         // Don't delete if an input/textarea is focused
@@ -193,7 +194,7 @@ export default function Canvas({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [editingId, broadcastDelete]);
+  }, [editingId, broadcastDelete, broadcastConnectorPreview]);
 
   // Attach transformer to selected nodes
   useEffect(() => {
@@ -326,10 +327,11 @@ export default function Canvas({
       broadcastUpdate(c.id, { properties: { fromId: connectingFrom, toId: objId } });
       setConnectingFrom(null);
       setConnectorPreview(null);
+      broadcastConnectorPreview(null);
       setActiveTool("select");
       return true;
     },
-    [connectingFrom, broadcastCreate, broadcastUpdate, setActiveTool]
+    [connectingFrom, broadcastCreate, broadcastUpdate, broadcastConnectorPreview, setActiveTool]
   );
 
   // Click on stage: create objects or clear selection
@@ -360,6 +362,7 @@ export default function Canvas({
         if (e.target === stage) {
           setConnectingFrom(null);
           setConnectorPreview(null);
+          broadcastConnectorPreview(null);
         }
         return;
       }
@@ -381,7 +384,7 @@ export default function Canvas({
         }
       }
     },
-    [stagePos, scale, broadcastCreate, setSelectedIds, setActiveTool, clearSelection]
+    [stagePos, scale, broadcastCreate, broadcastConnectorPreview, setSelectedIds, setActiveTool, clearSelection]
   );
 
   // Handle double-click on sticky note for inline text editing
@@ -438,8 +441,9 @@ export default function Canvas({
     }
     if (connectingFrom) {
       setConnectorPreview({ x: worldX, y: worldY });
+      broadcastConnectorPreview({ fromId: connectingFrom, toX: worldX, toY: worldY });
     }
-  }, [stagePos, scale, handleCursorMove, drawingLine, broadcastDrawPreview, connectingFrom]);
+  }, [stagePos, scale, handleCursorMove, drawingLine, broadcastDrawPreview, connectingFrom, broadcastConnectorPreview]);
 
   const cursorForTool = () => {
     if (isPanning) return "grab";
@@ -578,6 +582,25 @@ export default function Canvas({
               />
             );
           })()}
+          {/* Preview connector arrows from remote users */}
+          {Object.entries(remoteConnectorPreviews).map(([uid, p]) => {
+            const src = objects[p.fromId];
+            if (!src) return null;
+            return (
+              <Arrow
+                key={`connector-preview-${uid}`}
+                points={[src.x + src.width / 2, src.y + src.height / 2, p.toX, p.toY]}
+                stroke="#1a73e8"
+                strokeWidth={2}
+                pointerLength={10}
+                pointerWidth={8}
+                fill="#1a73e8"
+                dash={[8, 4]}
+                opacity={0.4}
+                listening={false}
+              />
+            );
+          })}
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}

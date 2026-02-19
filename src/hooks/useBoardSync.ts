@@ -41,6 +41,11 @@ export function useBoardSync(
   const [remoteDrawPreviews, setRemoteDrawPreviews] = useState<
     Record<string, { startX: number; startY: number; endX: number; endY: number }>
   >({});
+  const lastConnectorPreviewRef = useRef<number>(0);
+  const connectorPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [remoteConnectorPreviews, setRemoteConnectorPreviews] = useState<
+    Record<string, { fromId: string; toX: number; toY: number }>
+  >({});
   const pendingBroadcasts = useRef<
     Array<{ event: string; payload: Record<string, unknown> }>
   >([]);
@@ -297,6 +302,28 @@ export function useBoardSync(
       }
     );
 
+    // Incoming: connector:preview — ephemeral connector arrow preview from another user
+    channel.on(
+      "broadcast",
+      { event: "connector:preview" },
+      (payload: {
+        payload: {
+          senderId: string;
+          preview: { fromId: string; toX: number; toY: number } | null;
+        };
+      }) => {
+        const { senderId, preview } = payload.payload;
+        setRemoteConnectorPreviews((prev) => {
+          if (preview) {
+            return { ...prev, [senderId]: preview };
+          }
+          const next = { ...prev };
+          delete next[senderId];
+          return next;
+        });
+      }
+    );
+
     // Incoming: member:joined — new member accepted an invite
     channel.on(
       "broadcast",
@@ -511,5 +538,47 @@ export function useBoardSync(
     [user]
   );
 
-  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews };
+  // Outgoing: broadcastConnectorPreview (throttled, broadcast-only — ephemeral connector preview)
+  const broadcastConnectorPreview = useCallback(
+    (preview: { fromId: string; toX: number; toY: number } | null) => {
+      if (!channelRef.current || !connectedRef.current) return;
+
+      const send = () => {
+        lastConnectorPreviewRef.current = Date.now();
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "connector:preview",
+          payload: {
+            senderId: user?.uid || "",
+            preview,
+          },
+        });
+      };
+
+      // Send clear immediately
+      if (!preview) {
+        if (connectorPreviewTimerRef.current) {
+          clearTimeout(connectorPreviewTimerRef.current);
+          connectorPreviewTimerRef.current = null;
+        }
+        send();
+        return;
+      }
+
+      const elapsed = Date.now() - lastConnectorPreviewRef.current;
+      if (elapsed >= 50) {
+        if (connectorPreviewTimerRef.current) {
+          clearTimeout(connectorPreviewTimerRef.current);
+          connectorPreviewTimerRef.current = null;
+        }
+        send();
+      } else {
+        if (connectorPreviewTimerRef.current) clearTimeout(connectorPreviewTimerRef.current);
+        connectorPreviewTimerRef.current = setTimeout(send, 50 - elapsed);
+      }
+    },
+    [user]
+  );
+
+  return { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews };
 }
