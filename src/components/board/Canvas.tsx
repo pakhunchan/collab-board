@@ -345,8 +345,9 @@ export default function Canvas({
   // Keyboard: space for pan, delete for removing objects
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore when editing text
-      if (editingId) return;
+      // Ignore when editing text or when an input/textarea is focused
+      const tag = (e.target as HTMLElement).tagName;
+      if (editingId || tag === "INPUT" || tag === "TEXTAREA") return;
 
       if (e.key === "Shift") shiftHeld.current = true;
       if (e.code === "Space" && !e.repeat) {

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Toolbar from "@/components/board/Toolbar";
+import AiPrompt from "@/components/board/AiPrompt";
 import { useAuth } from "@/lib/auth-context";
 import { useConnectionManager } from "@/hooks/useConnectionManager";
 
@@ -91,6 +92,7 @@ export default function BoardPage({ params }: { params: { id: string } }) {
           onAccessRevoked={onAccessRevoked}
           onMemberJoined={onMemberJoined}
         />
+        <AiPrompt boardId={params.id} />
       </div>
     </div>
   );
