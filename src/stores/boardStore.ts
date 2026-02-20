@@ -38,6 +38,7 @@ interface BoardStore {
   applyRemoteCreate: (obj: BoardObject) => void;
   applyRemoteUpdate: (id: string, changes: Partial<BoardObject>) => void;
   applyRemoteDelete: (id: string) => void;
+  applyRemoteBatchUpdate: (updates: Array<{ objectId: string; changes: Partial<BoardObject> }>) => void;
 
   // Persistence
   loadObjects: (objects: BoardObject[]) => void;
@@ -130,6 +131,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         objects: next,
         selectedIds: state.selectedIds.filter((sid) => sid !== id),
       };
+    }),
+  applyRemoteBatchUpdate: (updates) =>
+    set((state) => {
+      let newObjects = state.objects;
+      let changed = false;
+      for (const { objectId, changes } of updates) {
+        const existing = newObjects[objectId];
+        if (!existing) continue;
+        if (!changed) {
+          newObjects = { ...newObjects };
+          changed = true;
+        }
+        newObjects[objectId] = { ...existing, ...changes };
+      }
+      return changed ? { objects: newObjects } : state;
     }),
 
   loadObjects: (objects) => {

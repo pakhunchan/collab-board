@@ -34,8 +34,9 @@ export function useBoardSync(
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
-  const lastLiveMoveRef = useRef<number>(0);
+  const pendingLiveMovesRef = useRef<Map<string, Partial<BoardObject>>>(new Map());
   const liveMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLiveMoveSentRef = useRef<number>(0);
   const lastDrawPreviewRef = useRef<number>(0);
   const drawPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [remoteDrawPreviews, setRemoteDrawPreviews] = useState<
@@ -253,6 +254,19 @@ export function useBoardSync(
       }) => {
         const { objectId, changes } = payload.payload;
         useBoardStore.getState().applyRemoteUpdate(objectId, changes);
+      }
+    );
+
+    // Incoming: objects:batch-update (live-move batches)
+    channel.on(
+      "broadcast",
+      { event: "objects:batch-update" },
+      (payload: {
+        payload: {
+          updates: Array<{ objectId: string; changes: Partial<BoardObject> }>;
+        };
+      }) => {
+        useBoardStore.getState().applyRemoteBatchUpdate(payload.payload.updates);
       }
     );
 
@@ -492,34 +506,44 @@ export function useBoardSync(
   );
 
   // Outgoing: broadcastLiveMove (throttled, broadcast-only — no store update, no DB write)
+  // Batches all pending object updates into a single message per throttle window.
   const broadcastLiveMove = useCallback(
     (id: string, changes: Partial<BoardObject>) => {
       if (!channelRef.current || !connectedRef.current) return;
 
-      const send = () => {
-        lastLiveMoveRef.current = Date.now();
+      // Accumulate into map (last-write-wins per object ID)
+      pendingLiveMovesRef.current.set(id, changes);
+
+      // If a flush is already scheduled, just accumulate
+      if (liveMoveTimerRef.current !== null) return;
+
+      // Leading-edge: 0ms delay if ≥50ms since last send, otherwise wait remaining time
+      const elapsed = Date.now() - lastLiveMoveSentRef.current;
+      const delay = elapsed >= 50 ? 0 : 50 - elapsed;
+
+      liveMoveTimerRef.current = setTimeout(() => {
+        liveMoveTimerRef.current = null;
+        const pending = pendingLiveMovesRef.current;
+        if (pending.size === 0) return;
+
+        lastLiveMoveSentRef.current = Date.now();
+
+        // Build batch array and send ONE message
+        const updates: Array<{ objectId: string; changes: Partial<BoardObject> }> = [];
+        pending.forEach((objChanges, objectId) => {
+          updates.push({ objectId, changes: objChanges });
+        });
+        pending.clear();
+
         channelRef.current?.send({
           type: "broadcast",
-          event: "object:update",
+          event: "objects:batch-update",
           payload: {
             senderId: user?.uid || "",
-            objectId: id,
-            changes,
+            updates,
           },
         });
-      };
-
-      const elapsed = Date.now() - lastLiveMoveRef.current;
-      if (elapsed >= 50) {
-        if (liveMoveTimerRef.current) {
-          clearTimeout(liveMoveTimerRef.current);
-          liveMoveTimerRef.current = null;
-        }
-        send();
-      } else {
-        if (liveMoveTimerRef.current) clearTimeout(liveMoveTimerRef.current);
-        liveMoveTimerRef.current = setTimeout(send, 50 - elapsed);
-      }
+      }, delay);
     },
     [user]
   );

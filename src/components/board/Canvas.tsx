@@ -225,6 +225,9 @@ export default function Canvas({
           broadcastLiveMoveRef.current(childId, childChanges);
         }
       }
+
+      // Force canvas redraw so connectors pick up new positions during drag
+      stage.batchDraw();
     };
 
     const dragEndHandler = (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -747,6 +750,18 @@ export default function Canvas({
           width: dx,
           height: dy,
         });
+        // Auto-adopt: if line was created inside an existing frame, set parentFrameId
+        const allObjs = useBoardStore.getState().objects;
+        const createdLine = allObjs[obj.id];
+        if (createdLine) {
+          const parentFrame = findInnermostFrame(createdLine, allObjs);
+          if (parentFrame) {
+            broadcastUpdate(obj.id, {
+              properties: { ...createdLine.properties, parentFrameId: parentFrame },
+            });
+          }
+        }
+
         setSelectedIds([obj.id]);
         setActiveTool("select");
         setDrawingLine(null);
@@ -796,6 +811,20 @@ export default function Canvas({
             for (const child of insideObjs) {
               broadcastUpdate(child.id, {
                 properties: { ...child.properties, parentFrameId: obj.id },
+              });
+            }
+          }
+        }
+
+        // Auto-adopt: if a non-frame object was created inside an existing frame, set parentFrameId
+        if (drawingShape.tool !== "frame") {
+          const allObjs = useBoardStore.getState().objects;
+          const created = allObjs[obj.id];
+          if (created) {
+            const parentFrame = findInnermostFrame(created, allObjs);
+            if (parentFrame) {
+              broadcastUpdate(obj.id, {
+                properties: { ...created.properties, parentFrameId: parentFrame },
               });
             }
           }
@@ -964,6 +993,8 @@ export default function Canvas({
           node.y(newY);
         }
       }
+      // Force canvas redraw so connectors pick up new positions during multi-drag
+      stage.batchDraw();
       return;
     }
 
