@@ -2,6 +2,8 @@ import { Group, Ellipse } from "react-konva";
 import { BoardObject } from "@/types/board";
 import Konva from "konva";
 import { useRef } from "react";
+import { SELECTION_COLOR } from "./shapeUtils";
+import { useTransformEnd } from "./useTransformEnd";
 
 interface CircleShapeProps {
   obj: BoardObject;
@@ -17,6 +19,7 @@ export default function CircleShape({
   onChange,
 }: CircleShapeProps) {
   const groupRef = useRef<Konva.Group>(null);
+  const handleTransformEnd = useTransformEnd(groupRef, onChange, { minWidth: 30, minHeight: 30, keepSquare: true });
 
   return (
     <Group
@@ -33,27 +36,7 @@ export default function CircleShape({
       onDragEnd={(e) => {
         onChange({ x: e.target.x(), y: e.target.y() });
       }}
-      onTransformEnd={() => {
-        const node = groupRef.current;
-        if (!node) return;
-        const scaleX = node.scaleX();
-        const scaleY = node.scaleY();
-        node.scaleX(1);
-        node.scaleY(1);
-
-        // Force circles to maintain aspect ratio by using the larger dimension
-        const newWidth = Math.max(30, node.width() * scaleX);
-        const newHeight = Math.max(30, node.height() * scaleY);
-        const size = Math.max(newWidth, newHeight);
-
-        onChange({
-          x: node.x(),
-          y: node.y(),
-          width: size,
-          height: size,
-          rotation: node.rotation(),
-        });
-      }}
+      onTransformEnd={handleTransformEnd}
     >
       <Ellipse
         x={obj.width / 2}
@@ -61,7 +44,7 @@ export default function CircleShape({
         radiusX={obj.width / 2}
         radiusY={obj.height / 2}
         fill={obj.color}
-        stroke={isSelected ? "#1a73e8" : "#666"}
+        stroke={isSelected ? SELECTION_COLOR : "#666"}
         strokeWidth={isSelected ? 2 : 1}
       />
     </Group>

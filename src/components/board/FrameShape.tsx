@@ -2,6 +2,8 @@ import { Group, Rect, Text } from "react-konva";
 import { BoardObject } from "@/types/board";
 import Konva from "konva";
 import { useRef } from "react";
+import { SELECTION_COLOR } from "./shapeUtils";
+import { useTransformEnd } from "./useTransformEnd";
 
 interface FrameShapeProps {
   obj: BoardObject;
@@ -24,6 +26,7 @@ export default function FrameShape({
   onDblClick,
 }: FrameShapeProps) {
   const groupRef = useRef<Konva.Group>(null);
+  const handleTransformEnd = useTransformEnd(groupRef, onChange, { minWidth: 100, minHeight: 60 });
 
   return (
     <Group
@@ -42,21 +45,7 @@ export default function FrameShape({
       onDragEnd={(e) => {
         onChange({ x: e.target.x(), y: e.target.y() });
       }}
-      onTransformEnd={() => {
-        const node = groupRef.current;
-        if (!node) return;
-        const scaleX = node.scaleX();
-        const scaleY = node.scaleY();
-        node.scaleX(1);
-        node.scaleY(1);
-        onChange({
-          x: node.x(),
-          y: node.y(),
-          width: Math.max(100, node.width() * scaleX),
-          height: Math.max(60, node.height() * scaleY),
-          rotation: node.rotation(),
-        });
-      }}
+      onTransformEnd={handleTransformEnd}
     >
       {/* Title text — positioned above the frame body */}
       <Text
@@ -76,7 +65,7 @@ export default function FrameShape({
         width={obj.width}
         height={obj.height}
         fill="#ffffff"
-        stroke={isSelected ? "#1a73e8" : "#d0d0d0"}
+        stroke={isSelected ? SELECTION_COLOR : "#d0d0d0"}
         strokeWidth={isSelected ? 2 : 1}
         cornerRadius={4}
       />

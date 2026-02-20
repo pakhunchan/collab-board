@@ -2,6 +2,7 @@ import { Line } from "react-konva";
 import { BoardObject } from "@/types/board";
 import Konva from "konva";
 import { useRef } from "react";
+import { useTransformEnd } from "./useTransformEnd";
 
 interface LineShapeProps {
   obj: BoardObject;
@@ -16,6 +17,7 @@ export default function LineShape({
   onChange,
 }: LineShapeProps) {
   const lineRef = useRef<Konva.Line>(null);
+  const handleTransformEnd = useTransformEnd(lineRef, onChange);
 
   return (
     <Line
@@ -34,21 +36,7 @@ export default function LineShape({
       onDragEnd={(e) => {
         onChange({ x: e.target.x(), y: e.target.y() });
       }}
-      onTransformEnd={() => {
-        const node = lineRef.current;
-        if (!node) return;
-        const scaleX = node.scaleX();
-        const scaleY = node.scaleY();
-        node.scaleX(1);
-        node.scaleY(1);
-        onChange({
-          x: node.x(),
-          y: node.y(),
-          width: node.width() * scaleX,
-          height: node.height() * scaleY,
-          rotation: node.rotation(),
-        });
-      }}
+      onTransformEnd={handleTransformEnd}
     />
   );
 }

@@ -2,6 +2,8 @@ import { Group, Rect, Text } from "react-konva";
 import { BoardObject } from "@/types/board";
 import Konva from "konva";
 import { useRef } from "react";
+import { SELECTION_COLOR } from "./shapeUtils";
+import { useTransformEnd } from "./useTransformEnd";
 
 interface StickyNoteProps {
   obj: BoardObject;
@@ -24,6 +26,7 @@ export default function StickyNote({
   onDblClick,
 }: StickyNoteProps) {
   const groupRef = useRef<Konva.Group>(null);
+  const handleTransformEnd = useTransformEnd(groupRef, onChange, { minWidth: 50, minHeight: 50 });
 
   return (
     <Group
@@ -42,21 +45,7 @@ export default function StickyNote({
       onDragEnd={(e) => {
         onChange({ x: e.target.x(), y: e.target.y() });
       }}
-      onTransformEnd={() => {
-        const node = groupRef.current;
-        if (!node) return;
-        const scaleX = node.scaleX();
-        const scaleY = node.scaleY();
-        node.scaleX(1);
-        node.scaleY(1);
-        onChange({
-          x: node.x(),
-          y: node.y(),
-          width: Math.max(50, node.width() * scaleX),
-          height: Math.max(50, node.height() * scaleY),
-          rotation: node.rotation(),
-        });
-      }}
+      onTransformEnd={handleTransformEnd}
     >
       <Rect
         width={obj.width}
@@ -66,7 +55,7 @@ export default function StickyNote({
         shadowColor="rgba(0,0,0,0.15)"
         shadowBlur={8}
         shadowOffsetY={2}
-        stroke={isSelected ? "#1a73e8" : "transparent"}
+        stroke={isSelected ? SELECTION_COLOR : "transparent"}
         strokeWidth={isSelected ? 2 : 0}
       />
       <Text
