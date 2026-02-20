@@ -1,27 +1,8 @@
 import { create } from "zustand";
 import { BoardObject, BoardObjectType } from "@/types/board";
+import { buildBoardObject } from "@/lib/board-object-defaults";
 
 export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text" | "connector" | "frame";
-
-const DEFAULT_COLORS: Record<BoardObjectType, string> = {
-  sticky: "#FFEB3B",
-  rectangle: "#90CAF9",
-  circle: "#CE93D8",
-  line: "#666666",
-  text: "#333333",
-  connector: "#666666",
-  frame: "#4A90D9",
-};
-
-const DEFAULT_SIZES: Record<BoardObjectType, { width: number; height: number }> = {
-  sticky: { width: 200, height: 200 },
-  rectangle: { width: 240, height: 160 },
-  circle: { width: 160, height: 160 },
-  line: { width: 200, height: 0 },
-  text: { width: 200, height: 40 },
-  connector: { width: 0, height: 0 },
-  frame: { width: 400, height: 300 },
-};
 
 interface BoardStore {
   // Tool state
@@ -62,28 +43,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   objects: {},
   addObject: (type, x, y) => {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const size = DEFAULT_SIZES[type];
-    const obj: BoardObject = {
-      id,
-      boardId: "",
-      type,
-      x: x - size.width / 2,
-      y: y - size.height / 2,
-      width: size.width,
-      height: size.height,
-      rotation: 0,
-      ...(type === "text" ? { text: "" } : type === "frame" ? { text: "Frame" } : {}),
-      color: DEFAULT_COLORS[type],
-      zIndex: type === "frame" ? -1 : Object.keys(get().objects).length,
-      properties: {},
-      createdBy: "",
-      updatedAt: now,
-      createdAt: now,
-    };
+    const zIndex = type === "frame" ? -1 : Object.keys(get().objects).length;
+    const obj = buildBoardObject(type, x, y, { zIndex });
     set((state) => ({
-      objects: { ...state.objects, [id]: obj },
+      objects: { ...state.objects, [obj.id]: obj },
     }));
     return obj;
   },
