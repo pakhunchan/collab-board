@@ -988,6 +988,14 @@ export default function Canvas({
     [handleTextareaBlur]
   );
 
+  const handleTextareaChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      if (!editingId) return;
+      broadcastUpdate(editingId, { text: e.target.value });
+    },
+    [editingId, broadcastUpdate]
+  );
+
   const sortedObjects = Object.values(objects).sort((a, b) => a.zIndex - b.zIndex);
 
   const handleMouseMove = useCallback(() => {
@@ -1160,6 +1168,7 @@ export default function Canvas({
                 key={obj.id}
                 obj={obj}
                 isSelected={selectedIds.includes(obj.id)}
+                isEditing={editingId === obj.id}
                 onSelect={onSelect}
                 onChange={(changes) => broadcastUpdate(obj.id, changes)}
                 onDblClick={() => handleStickyDblClick(obj.id)}
@@ -1476,23 +1485,26 @@ export default function Canvas({
 
       {/* Inline text editing overlay */}
       {editingId && (() => {
-        const isFrame = objects[editingId]?.type === "frame";
+        const editingObj = objects[editingId];
+        const isFrame = editingObj?.type === "frame";
+        const isText = editingObj?.type === "text";
         return (
           <textarea
             ref={textareaRef}
-            defaultValue={objects[editingId]?.text || ""}
+            defaultValue={editingObj?.text || ""}
             onBlur={handleTextareaBlur}
             onKeyDown={handleTextareaKeyDown}
+            onChange={handleTextareaChange}
             style={{
               position: "absolute",
               top: textareaPos.y,
               left: textareaPos.x,
               width: textareaPos.width,
               height: textareaPos.height,
-              padding: isFrame ? `${4 * scale}px` : `${12 * scale}px`,
-              fontSize: isFrame ? `${14 * scale}px` : `${16 * scale}px`,
+              padding: isFrame ? `${4 * scale}px` : isText ? "0" : `${12 * scale}px`,
+              fontSize: isFrame ? `${14 * scale}px` : isText ? `${18 * scale}px` : `${16 * scale}px`,
               fontFamily: "sans-serif",
-              color: isFrame ? "#666666" : "#333",
+              color: isFrame ? "#666666" : isText ? (editingObj?.color || "#333") : "#333",
               background: "transparent",
               border: "none",
               margin: 0,

@@ -8,6 +8,7 @@ import { useTransformEnd } from "./useTransformEnd";
 interface TextShapeProps {
   obj: BoardObject;
   isSelected: boolean;
+  isEditing: boolean;
   onSelect: () => void;
   onChange: (changes: Partial<BoardObject>) => void;
   onDblClick: () => void;
@@ -16,6 +17,7 @@ interface TextShapeProps {
 export default function TextShape({
   obj,
   isSelected,
+  isEditing,
   onSelect,
   onChange,
   onDblClick,
@@ -59,6 +61,7 @@ export default function TextShape({
         fontFamily="sans-serif"
         fill={obj.color}
         wrap="word"
+        visible={!isEditing}
       />
     </Group>
   );
