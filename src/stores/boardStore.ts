@@ -74,7 +74,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       width: size.width,
       height: size.height,
       rotation: 0,
-      ...(type === "text" ? { text: "Text" } : type === "frame" ? { text: "Frame" } : {}),
+      ...(type === "text" ? { text: "" } : type === "frame" ? { text: "Frame" } : {}),
       color: DEFAULT_COLORS[type],
       zIndex: type === "frame" ? -1 : Object.keys(get().objects).length,
       properties: {},

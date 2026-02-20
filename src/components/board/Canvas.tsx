@@ -627,6 +627,46 @@ export default function Canvas({
     [stagePos, scale]
   );
 
+  // Handle double-click on sticky note for inline text editing
+  const FRAME_TITLE_HEIGHT = 24;
+  const handleStickyDblClick = useCallback(
+    (objId: string) => {
+      const obj = useBoardStore.getState().objects[objId];
+      if (!obj) return;
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // Use Konva's absolute transform to get exact screen position
+      const node = stage.findOne("#" + objId);
+      if (!node) return;
+      const absTransform = node.getAbsoluteTransform();
+      const rotation = obj.rotation || 0;
+
+      let localY = 0;
+      let h = obj.height;
+      if (obj.type === "frame") {
+        localY = -FRAME_TITLE_HEIGHT;
+        h = FRAME_TITLE_HEIGHT;
+      }
+
+      // Transform local top-left point to screen coordinates
+      const screenPos = absTransform.point({ x: 0, y: localY });
+
+      setEditingId(objId);
+      setTextareaPos({
+        x: screenPos.x,
+        y: screenPos.y,
+        width: obj.width * scale,
+        height: h * scale,
+        rotation,
+      });
+
+      // Focus textarea after render
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    },
+    [scale]
+  );
+
   const handleMouseUp = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (e.evt.button === 1 && !spaceHeld.current) {
@@ -862,9 +902,15 @@ export default function Canvas({
         setDrawingShape(null);
         setDrawingShapeEnd(null);
         broadcastShapePreview(null);
+
+        // Auto-enter editing mode for text objects so user can type immediately
+        if (drawingShape.tool === "text") {
+          const textObjId = obj.id;
+          setTimeout(() => handleStickyDblClick(textObjId), 0);
+        }
       }
     },
-    [drawingLine, drawingShape, selectionBox, connectionDrag, hoverTargetId, hoverPort, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, broadcastConnectorPreview, setSelectedIds, setActiveTool]
+    [drawingLine, drawingShape, selectionBox, connectionDrag, hoverTargetId, hoverPort, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, broadcastConnectorPreview, setSelectedIds, setActiveTool, handleStickyDblClick]
   );
 
   // Handle object click when connector tool is active
@@ -931,46 +977,6 @@ export default function Canvas({
       }
     },
     [broadcastConnectorPreview, clearSelection]
-  );
-
-  // Handle double-click on sticky note for inline text editing
-  const FRAME_TITLE_HEIGHT = 24;
-  const handleStickyDblClick = useCallback(
-    (objId: string) => {
-      const obj = useBoardStore.getState().objects[objId];
-      if (!obj) return;
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      // Use Konva's absolute transform to get exact screen position
-      const node = stage.findOne("#" + objId);
-      if (!node) return;
-      const absTransform = node.getAbsoluteTransform();
-      const rotation = obj.rotation || 0;
-
-      let localY = 0;
-      let h = obj.height;
-      if (obj.type === "frame") {
-        localY = -FRAME_TITLE_HEIGHT;
-        h = FRAME_TITLE_HEIGHT;
-      }
-
-      // Transform local top-left point to screen coordinates
-      const screenPos = absTransform.point({ x: 0, y: localY });
-
-      setEditingId(objId);
-      setTextareaPos({
-        x: screenPos.x,
-        y: screenPos.y,
-        width: obj.width * scale,
-        height: h * scale,
-        rotation,
-      });
-
-      // Focus textarea after render
-      setTimeout(() => textareaRef.current?.focus(), 0);
-    },
-    [scale]
   );
 
   const handleTextareaBlur = useCallback(() => {
@@ -1492,6 +1498,7 @@ export default function Canvas({
           <textarea
             ref={textareaRef}
             defaultValue={editingObj?.text || ""}
+            placeholder={isText ? "Text" : ""}
             onBlur={handleTextareaBlur}
             onKeyDown={handleTextareaKeyDown}
             onChange={handleTextareaChange}

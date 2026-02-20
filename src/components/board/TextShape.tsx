@@ -56,10 +56,11 @@ export default function TextShape({
       )}
       <Text
         width={obj.width}
-        text={obj.text || ""}
+        text={obj.text || "Text"}
         fontSize={18}
         fontFamily="sans-serif"
         fill={obj.color}
+        opacity={obj.text ? 1 : 0.3}
         wrap="word"
         visible={!isEditing}
       />
