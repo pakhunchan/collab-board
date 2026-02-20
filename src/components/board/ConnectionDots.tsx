@@ -1,31 +1,12 @@
 import { Circle } from "react-konva";
 import { BoardObject } from "@/types/board";
+import { SELECTION_COLOR, rotatePoint, getPortPosition, type Side } from "./shapeUtils";
 
-export type Side = "top" | "right" | "bottom" | "left";
+export type { Side };
+export { getPortPosition };
 
 const SIDES: Side[] = ["top", "right", "bottom", "left"];
 const OFFSET = 22;
-
-function rotatePoint(px: number, py: number, ox: number, oy: number, deg: number) {
-  if (deg === 0) return { x: px, y: py };
-  const rad = (deg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  const dx = px - ox;
-  const dy = py - oy;
-  return { x: ox + dx * cos - dy * sin, y: oy + dx * sin + dy * cos };
-}
-
-export function getPortPosition(obj: BoardObject, side: Side) {
-  let pos;
-  switch (side) {
-    case "top":    pos = { x: obj.x + obj.width / 2, y: obj.y }; break;
-    case "right":  pos = { x: obj.x + obj.width, y: obj.y + obj.height / 2 }; break;
-    case "bottom": pos = { x: obj.x + obj.width / 2, y: obj.y + obj.height }; break;
-    case "left":   pos = { x: obj.x, y: obj.y + obj.height / 2 }; break;
-  }
-  return rotatePoint(pos.x, pos.y, obj.x, obj.y, obj.rotation);
-}
 
 export function getDotPosition(obj: BoardObject, side: Side) {
   let pos;
@@ -68,8 +49,8 @@ export default function ConnectionDots({
               x={pos.x}
               y={pos.y}
               radius={5 * invScale}
-              fill="#1a73e8"
-              stroke="#1a73e8"
+              fill={SELECTION_COLOR}
+              stroke={SELECTION_COLOR}
               strokeWidth={1 * invScale}
               onMouseDown={(e) => {
                 e.cancelBubble = true;
@@ -94,8 +75,8 @@ export default function ConnectionDots({
             x={pos.x}
             y={pos.y}
             radius={(isHighlighted ? 8 : 6) * invScale}
-            fill={isHighlighted ? "#1a73e8" : "white"}
-            stroke="#1a73e8"
+            fill={isHighlighted ? SELECTION_COLOR : "white"}
+            stroke={SELECTION_COLOR}
             strokeWidth={(isHighlighted ? 2 : 1.5) * invScale}
             listening={false}
           />
