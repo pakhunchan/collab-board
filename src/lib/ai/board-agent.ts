@@ -256,46 +256,77 @@ export async function runBoardAgent(
       };
     }
 
-    // Execute each tool call and append results
-    for (const toolCall of assistantMessage.tool_calls) {
-      if (toolCall.type !== "function") continue;
+    // Execute tool calls in parallel, grouped by operation type for correct ordering
+    const toolCalls = assistantMessage.tool_calls.filter((tc) => tc.type === "function");
 
-      const fn = toolCall.function;
-      const args = JSON.parse(fn.arguments);
-      let result: unknown;
-
-      try {
-        switch (fn.name) {
-          case "create_shape": {
-            const obj = await executeCreateShape(args, boardId, userId);
-            createdObjects.push(obj);
-            result = { success: true, id: obj.id, type: obj.type };
-            break;
-          }
-          case "get_board_objects":
-            result = await executeGetBoardObjects(boardId);
-            break;
-          case "update_object":
-            result = await executeUpdateObject(args, boardId);
-            result = { success: true, id: args.id };
-            break;
-          case "delete_object":
-            result = await executeDeleteObject(args, boardId);
-            result = { success: true, deleted: args.id };
-            break;
-          default:
-            result = { error: `Unknown tool: ${fn.name}` };
-        }
-      } catch (err) {
-        result = { error: err instanceof Error ? err.message : "Unknown error" };
-      }
-
-      messages.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: JSON.stringify(result),
-      });
+    const executionOrder = ["get_board_objects", "delete_object", "create_shape", "update_object"];
+    const grouped = new Map<string, typeof toolCalls>();
+    for (const tc of toolCalls) {
+      const name = tc.function.name;
+      if (!grouped.has(name)) grouped.set(name, []);
+      grouped.get(name)!.push(tc);
     }
+
+    const toolResults: ChatCompletionMessageParam[] = [];
+
+    for (const opName of executionOrder) {
+      const group = grouped.get(opName);
+      if (!group) continue;
+
+      const results = await Promise.all(
+        group.map(async (toolCall) => {
+          const args = JSON.parse(toolCall.function.arguments);
+          let result: unknown;
+
+          try {
+            switch (opName) {
+              case "create_shape": {
+                const obj = await executeCreateShape(args, boardId, userId);
+                createdObjects.push(obj);
+                result = { success: true, id: obj.id, type: obj.type };
+                break;
+              }
+              case "get_board_objects":
+                result = await executeGetBoardObjects(boardId);
+                break;
+              case "update_object":
+                result = await executeUpdateObject(args, boardId);
+                result = { success: true, id: args.id };
+                break;
+              case "delete_object":
+                result = await executeDeleteObject(args, boardId);
+                result = { success: true, deleted: args.id };
+                break;
+              default:
+                result = { error: `Unknown tool: ${opName}` };
+            }
+          } catch (err) {
+            result = { error: err instanceof Error ? err.message : "Unknown error" };
+          }
+
+          return {
+            role: "tool" as const,
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
+          };
+        })
+      );
+
+      toolResults.push(...results);
+    }
+
+    // Handle any unknown tool types not in executionOrder
+    for (const tc of toolCalls) {
+      if (!executionOrder.includes(tc.function.name)) {
+        toolResults.push({
+          role: "tool" as const,
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: `Unknown tool: ${tc.function.name}` }),
+        });
+      }
+    }
+
+    messages.push(...toolResults);
   }
 
   return {
