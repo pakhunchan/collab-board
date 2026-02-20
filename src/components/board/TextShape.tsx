@@ -44,16 +44,15 @@ export default function TextShape({
       }}
       onTransformEnd={handleTransformEnd}
     >
-      {isSelected && (
-        <Rect
-          width={obj.width}
-          height={obj.height}
-          stroke={SELECTION_COLOR}
-          strokeWidth={1}
-          dash={[4, 4]}
-          fill="transparent"
-        />
-      )}
+      {/* Transparent hit area so clicks are received even when not selected */}
+      <Rect
+        width={obj.width}
+        height={obj.height}
+        fill="transparent"
+        stroke={isSelected ? SELECTION_COLOR : undefined}
+        strokeWidth={isSelected ? 1 : 0}
+        dash={isSelected ? [4, 4] : undefined}
+      />
       {(() => {
         const tp = getTextDisplayProps(obj, isEditing);
         return tp && <Text {...tp} />;
