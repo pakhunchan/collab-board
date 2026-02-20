@@ -56,6 +56,7 @@ export default function StickyNote({
         shadowOffsetY={2}
         stroke={isSelected ? SELECTION_COLOR : "transparent"}
         strokeWidth={isSelected ? 2 : 0}
+        hitStrokeWidth={12}
       />
       {(() => {
         const tp = getTextDisplayProps(obj, isEditing);

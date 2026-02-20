@@ -67,6 +67,7 @@ export default function FrameShape({
         fill="#ffffff"
         stroke={isSelected ? SELECTION_COLOR : "#d0d0d0"}
         strokeWidth={isSelected ? 2 : 1}
+        hitStrokeWidth={12}
         cornerRadius={4}
       />
     </Group>

@@ -33,6 +33,7 @@ export default function RectShape({
       fill={obj.color}
       stroke={isSelected ? SELECTION_COLOR : "#666"}
       strokeWidth={isSelected ? 2 : 1}
+      hitStrokeWidth={12}
       draggable
       onClick={onSelect}
       onTap={onSelect}

@@ -44,7 +44,7 @@ export default function TextShape({
       }}
       onTransformEnd={handleTransformEnd}
     >
-      {/* Transparent hit area so clicks are received even when not selected */}
+      {/* Transparent hit area with generous hitStrokeWidth for easier clicking */}
       <Rect
         width={obj.width}
         height={obj.height}
@@ -52,6 +52,7 @@ export default function TextShape({
         stroke={isSelected ? SELECTION_COLOR : undefined}
         strokeWidth={isSelected ? 1 : 0}
         dash={isSelected ? [4, 4] : undefined}
+        hitStrokeWidth={12}
       />
       {(() => {
         const tp = getTextDisplayProps(obj, isEditing);
