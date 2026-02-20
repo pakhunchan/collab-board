@@ -47,7 +47,7 @@ export interface PersistentChannel {
  */
 export function createPersistentChannel(boardId: string): PersistentChannel {
   const supabase = getSupabaseServerClient();
-  const channelName = `board:${boardId}:objects:agent`;
+  const channelName = `board:${boardId}:objects`;
   const channel = supabase.channel(channelName);
 
   let subscribed = false;
