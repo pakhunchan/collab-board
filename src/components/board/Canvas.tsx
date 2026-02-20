@@ -159,6 +159,11 @@ export default function Canvas({
     positions: Record<string, { x: number; y: number }>;
     moved: boolean;
   } | null>(null);
+  const frameDragState = useRef<{
+    frameId: string;
+    initialFramePos: { x: number; y: number };
+    childPositions: Record<string, { x: number; y: number }>;
+  } | null>(null);
 
   // Real-time cursors
   const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
@@ -203,26 +208,39 @@ export default function Canvas({
       useBoardStore.getState().applyRemoteUpdate(id, changes);
       broadcastLiveMoveRef.current(id, changes);
 
-      // If dragging a frame, move all descendants
+      // If dragging a frame, move child Konva nodes for visual feedback
+      // Store updates + broadcasts happen in handleMouseMove (React context) so connectors re-render
       if (obj?.type === "frame") {
-        const dx = node.x() - obj.x;
-        const dy = node.y() - obj.y;
         const selected = useBoardStore.getState().selectedIds;
-        // Only skip children that are being independently dragged in a multi-select
         const isMultiSelectDrag = selected.includes(id) && selected.length > 1;
-        const children = getChildIds(id, objs);
-        for (const childId of children) {
-          if (isMultiSelectDrag && selected.includes(childId)) continue;
-          const child = objs[childId];
-          if (!child) continue;
-          const childNode = stage.findOne("#" + childId);
-          if (childNode) {
-            childNode.x(child.x + dx);
-            childNode.y(child.y + dy);
+
+        if (!isMultiSelectDrag) {
+          const children = getChildIds(id, objs);
+
+          // Initialize tracking on first dragmove
+          if (!frameDragState.current || frameDragState.current.frameId !== id) {
+            const positions: Record<string, { x: number; y: number }> = {};
+            for (const childId of children) {
+              const child = objs[childId];
+              if (child) positions[childId] = { x: child.x, y: child.y };
+            }
+            frameDragState.current = {
+              frameId: id,
+              initialFramePos: { x: obj.x, y: obj.y },
+              childPositions: positions,
+            };
           }
-          const childChanges = { x: child.x + dx, y: child.y + dy };
-          useBoardStore.getState().applyRemoteUpdate(childId, childChanges);
-          broadcastLiveMoveRef.current(childId, childChanges);
+
+          // Move child Konva nodes for immediate visual feedback only
+          const dx = node.x() - frameDragState.current.initialFramePos.x;
+          const dy = node.y() - frameDragState.current.initialFramePos.y;
+          for (const [childId, initPos] of Object.entries(frameDragState.current.childPositions)) {
+            const childNode = stage.findOne("#" + childId);
+            if (childNode) {
+              childNode.x(initPos.x + dx);
+              childNode.y(initPos.y + dy);
+            }
+          }
         }
       }
 
@@ -239,6 +257,8 @@ export default function Canvas({
       const objs = useBoardStore.getState().objects;
       const obj = objs[id];
       if (!obj) return;
+
+      frameDragState.current = null;
 
       // If a frame was dragged, persist children and adopt/unadopt objects
       if (obj.type === "frame") {
@@ -996,6 +1016,23 @@ export default function Canvas({
       // Force canvas redraw so connectors pick up new positions during multi-drag
       stage.batchDraw();
       return;
+    }
+
+    // Frame drag: sync children in React context so connectors update
+    if (frameDragState.current) {
+      const { initialFramePos, childPositions } = frameDragState.current;
+      const frameObj = useBoardStore.getState().objects[frameDragState.current.frameId];
+      if (frameObj) {
+        const dx = frameObj.x - initialFramePos.x;
+        const dy = frameObj.y - initialFramePos.y;
+        for (const [childId, initPos] of Object.entries(childPositions)) {
+          const newX = initPos.x + dx;
+          const newY = initPos.y + dy;
+          useBoardStore.getState().applyRemoteUpdate(childId, { x: newX, y: newY });
+          broadcastLiveMoveRef.current(childId, { x: newX, y: newY });
+        }
+        stage.batchDraw();
+      }
     }
 
     if (connectionDrag) {
