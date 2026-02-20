@@ -15,6 +15,7 @@ import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
 import FrameShape from "./FrameShape";
 import ConnectionDots, { type Side, getPortPosition, getDotPosition } from "./ConnectionDots";
+import { SELECTION_COLOR } from "./shapeUtils";
 import SelectionBox from "./SelectionBox";
 import ColorPicker from "./ColorPicker";
 import Cursors from "./Cursors";
@@ -231,15 +232,20 @@ export default function Canvas({
             };
           }
 
-          // Move child Konva nodes for immediate visual feedback only
+          // Move child Konva nodes AND update store + broadcast so React
+          // re-renders frame and children with consistent positions (no jitter).
           const dx = node.x() - frameDragState.current.initialFramePos.x;
           const dy = node.y() - frameDragState.current.initialFramePos.y;
           for (const [childId, initPos] of Object.entries(frameDragState.current.childPositions)) {
+            const newX = initPos.x + dx;
+            const newY = initPos.y + dy;
             const childNode = stage.findOne("#" + childId);
             if (childNode) {
-              childNode.x(initPos.x + dx);
-              childNode.y(initPos.y + dy);
+              childNode.x(newX);
+              childNode.y(newY);
             }
+            useBoardStore.getState().applyRemoteUpdate(childId, { x: newX, y: newY });
+            broadcastLiveMoveRef.current(childId, { x: newX, y: newY });
           }
         }
       }
@@ -1018,22 +1024,7 @@ export default function Canvas({
       return;
     }
 
-    // Frame drag: sync children in React context so connectors update
-    if (frameDragState.current) {
-      const { initialFramePos, childPositions } = frameDragState.current;
-      const frameObj = useBoardStore.getState().objects[frameDragState.current.frameId];
-      if (frameObj) {
-        const dx = frameObj.x - initialFramePos.x;
-        const dy = frameObj.y - initialFramePos.y;
-        for (const [childId, initPos] of Object.entries(childPositions)) {
-          const newX = initPos.x + dx;
-          const newY = initPos.y + dy;
-          useBoardStore.getState().applyRemoteUpdate(childId, { x: newX, y: newY });
-          broadcastLiveMoveRef.current(childId, { x: newX, y: newY });
-        }
-        stage.batchDraw();
-      }
-    }
+
 
     if (connectionDrag) {
       setConnectionDragPos({ x: worldX, y: worldY });
@@ -1304,11 +1295,11 @@ export default function Canvas({
             return (
               <Arrow
                 points={[fromX, fromY, connectorPreview.x, connectorPreview.y]}
-                stroke="#1a73e8"
+                stroke={SELECTION_COLOR}
                 strokeWidth={2}
                 pointerLength={10}
                 pointerWidth={8}
-                fill="#1a73e8"
+                fill={SELECTION_COLOR}
                 dash={[8, 4]}
                 listening={false}
                 opacity={0.6}
@@ -1323,11 +1314,11 @@ export default function Canvas({
               <Arrow
                 key={`connector-preview-${uid}`}
                 points={[src.x + src.width / 2, src.y + src.height / 2, p.toX, p.toY]}
-                stroke="#1a73e8"
+                stroke={SELECTION_COLOR}
                 strokeWidth={2}
                 pointerLength={10}
                 pointerWidth={8}
-                fill="#1a73e8"
+                fill={SELECTION_COLOR}
                 dash={[8, 4]}
                 opacity={0.4}
                 listening={false}
@@ -1443,11 +1434,11 @@ export default function Canvas({
             return (
               <Arrow
                 points={[fromPortPos.x, fromPortPos.y, connectionDragPos.x, connectionDragPos.y]}
-                stroke="#1a73e8"
+                stroke={SELECTION_COLOR}
                 strokeWidth={2}
                 pointerLength={10}
                 pointerWidth={8}
-                fill="#1a73e8"
+                fill={SELECTION_COLOR}
                 dash={[8, 4]}
                 listening={false}
                 opacity={0.6}
@@ -1506,7 +1497,7 @@ export default function Canvas({
               border: "none",
               margin: 0,
               borderRadius: isFrame ? "0" : `${4 * scale}px`,
-              outline: isFrame ? "none" : "2px solid #1a73e8",
+              outline: isFrame ? "none" : `2px solid ${SELECTION_COLOR}`,
               lineHeight: "1",
               resize: "none",
               overflow: "hidden",
