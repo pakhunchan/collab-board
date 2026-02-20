@@ -2,6 +2,61 @@ import { BoardObject } from "@/types/board";
 
 export const SELECTION_COLOR = "#1a73e8";
 
+export const PLACEHOLDER_TEXT: Record<string, string> = {
+  text: "Type something...",
+  sticky: "Type something...",
+};
+
+const TEXT_STYLE: Record<string, { fontSize: number; padding: number }> = {
+  text: { fontSize: 18, padding: 0 },
+  sticky: { fontSize: 16, padding: 12 },
+};
+
+export function isTextEditable(type: string): boolean {
+  return type in TEXT_STYLE;
+}
+
+export function getTextDisplayProps(obj: BoardObject, isEditing: boolean) {
+  const style = TEXT_STYLE[obj.type];
+  if (!style) return null;
+  const { display, isPlaceholder } = getTextWithPlaceholder(obj.type, obj.text);
+  const p = style.padding;
+  return {
+    x: p,
+    y: p,
+    width: obj.width - p * 2,
+    ...(p > 0 ? { height: obj.height - p * 2 } : {}),
+    text: display,
+    fontSize: style.fontSize,
+    fontFamily: "sans-serif",
+    fill: obj.type === "text" ? (obj.color || "#333") : "#333",
+    opacity: isPlaceholder ? 0.3 : 1,
+    wrap: "word" as const,
+    listening: false,
+    visible: !isEditing,
+  };
+}
+
+export function getTextEditStyle(
+  type: string,
+  scale: number,
+  color?: string,
+): { padding: string; fontSize: string; color: string } {
+  const style = TEXT_STYLE[type];
+  const s = style ?? { fontSize: 16, padding: 0 };
+  return {
+    padding: `${s.padding * scale}px`,
+    fontSize: `${s.fontSize * scale}px`,
+    color: type === "text" ? (color || "#333") : "#333",
+  };
+}
+
+export function getTextWithPlaceholder(type: string, text: string | undefined) {
+  const display = text || PLACEHOLDER_TEXT[type] || "";
+  const isPlaceholder = !text && !!PLACEHOLDER_TEXT[type];
+  return { display, isPlaceholder };
+}
+
 export type Side = "top" | "right" | "bottom" | "left";
 
 export function rotatePoint(px: number, py: number, ox: number, oy: number, deg: number) {

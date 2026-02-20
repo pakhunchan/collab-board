@@ -2,7 +2,7 @@ import { Group, Rect, Text } from "react-konva";
 import { BoardObject } from "@/types/board";
 import Konva from "konva";
 import { useRef } from "react";
-import { SELECTION_COLOR } from "./shapeUtils";
+import { SELECTION_COLOR, getTextDisplayProps } from "./shapeUtils";
 import { useTransformEnd } from "./useTransformEnd";
 
 interface TextShapeProps {
@@ -54,16 +54,10 @@ export default function TextShape({
           fill="transparent"
         />
       )}
-      <Text
-        width={obj.width}
-        text={obj.text || "Text"}
-        fontSize={18}
-        fontFamily="sans-serif"
-        fill={obj.color}
-        opacity={obj.text ? 1 : 0.3}
-        wrap="word"
-        visible={!isEditing}
-      />
+      {(() => {
+        const tp = getTextDisplayProps(obj, isEditing);
+        return tp && <Text {...tp} />;
+      })()}
     </Group>
   );
 }

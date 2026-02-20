@@ -15,7 +15,7 @@ import TextShape from "./TextShape";
 import ConnectorShape from "./ConnectorShape";
 import FrameShape from "./FrameShape";
 import ConnectionDots, { type Side, getPortPosition, getDotPosition } from "./ConnectionDots";
-import { SELECTION_COLOR } from "./shapeUtils";
+import { SELECTION_COLOR, PLACEHOLDER_TEXT, isTextEditable, getTextEditStyle } from "./shapeUtils";
 import SelectionBox from "./SelectionBox";
 import ColorPicker from "./ColorPicker";
 import Cursors from "./Cursors";
@@ -904,7 +904,7 @@ export default function Canvas({
         broadcastShapePreview(null);
 
         // Auto-enter editing mode for text objects so user can type immediately
-        if (drawingShape.tool === "text") {
+        if (isTextEditable(drawingShape.tool)) {
           const textObjId = obj.id;
           setTimeout(() => handleStickyDblClick(textObjId), 0);
         }
@@ -1133,6 +1133,9 @@ export default function Canvas({
                   return; // Keep multi-selection intact
                 }
                 setSelectedIds([obj.id]);
+                if (isTextEditable(obj.type) && editingId !== obj.id) {
+                  setTimeout(() => handleStickyDblClick(obj.id), 0);
+                }
               }
             };
             return obj.type === "sticky" ? (
@@ -1493,12 +1496,12 @@ export default function Canvas({
       {editingId && (() => {
         const editingObj = objects[editingId];
         const isFrame = editingObj?.type === "frame";
-        const isText = editingObj?.type === "text";
+        const editStyle = getTextEditStyle(editingObj?.type ?? "", scale, editingObj?.color);
         return (
           <textarea
             ref={textareaRef}
             defaultValue={editingObj?.text || ""}
-            placeholder={isText ? "Text" : ""}
+            placeholder={PLACEHOLDER_TEXT[editingObj?.type ?? ""] ?? ""}
             onBlur={handleTextareaBlur}
             onKeyDown={handleTextareaKeyDown}
             onChange={handleTextareaChange}
@@ -1508,10 +1511,10 @@ export default function Canvas({
               left: textareaPos.x,
               width: textareaPos.width,
               height: textareaPos.height,
-              padding: isFrame ? `${4 * scale}px` : isText ? "0" : `${12 * scale}px`,
-              fontSize: isFrame ? `${14 * scale}px` : isText ? `${18 * scale}px` : `${16 * scale}px`,
+              padding: isFrame ? `${4 * scale}px` : editStyle.padding,
+              fontSize: isFrame ? `${14 * scale}px` : editStyle.fontSize,
               fontFamily: "sans-serif",
-              color: isFrame ? "#666666" : isText ? (editingObj?.color || "#333") : "#333",
+              color: isFrame ? "#666666" : editStyle.color,
               background: "transparent",
               border: "none",
               margin: 0,

@@ -2,7 +2,7 @@ import { Group, Rect, Text } from "react-konva";
 import { BoardObject } from "@/types/board";
 import Konva from "konva";
 import { useRef } from "react";
-import { SELECTION_COLOR } from "./shapeUtils";
+import { SELECTION_COLOR, getTextDisplayProps } from "./shapeUtils";
 import { useTransformEnd } from "./useTransformEnd";
 
 interface StickyNoteProps {
@@ -14,7 +14,6 @@ interface StickyNoteProps {
   onDblClick: () => void;
 }
 
-const PADDING = 12;
 const CORNER_RADIUS = 4;
 
 export default function StickyNote({
@@ -58,19 +57,10 @@ export default function StickyNote({
         stroke={isSelected ? SELECTION_COLOR : "transparent"}
         strokeWidth={isSelected ? 2 : 0}
       />
-      <Text
-        x={PADDING}
-        y={PADDING}
-        width={obj.width - PADDING * 2}
-        height={obj.height - PADDING * 2}
-        text={obj.text || ""}
-        fontSize={16}
-        fontFamily="sans-serif"
-        fill="#333"
-        wrap="word"
-        listening={false}
-        visible={!isEditing}
-      />
+      {(() => {
+        const tp = getTextDisplayProps(obj, isEditing);
+        return tp && <Text {...tp} />;
+      })()}
     </Group>
   );
 }
