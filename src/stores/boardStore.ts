@@ -31,6 +31,10 @@ interface BoardStore {
   // Frames
   getFrameChildren: (frameId: string) => BoardObject[];
 
+  // Viewport
+  viewport: { centerX: number; centerY: number; width: number; height: number };
+  setViewport: (v: { centerX: number; centerY: number; width: number; height: number }) => void;
+
   // Selection
   selectedIds: string[];
   setSelectedIds: (ids: string[]) => void;
@@ -159,6 +163,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       (o) => o.properties?.parentFrameId === frameId
     );
   },
+
+  viewport: { centerX: 0, centerY: 0, width: 1, height: 1 },
+  setViewport: (v) => set({ viewport: v }),
 
   selectedIds: [],
   setSelectedIds: (ids) => set({ selectedIds: ids }),

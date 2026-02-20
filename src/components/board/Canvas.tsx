@@ -184,7 +184,19 @@ export default function Canvas({
   const setSelectedIds = useBoardStore((s) => s.setSelectedIds);
   const clearSelection = useBoardStore((s) => s.clearSelection);
 
+  const setViewport = useBoardStore((s) => s.setViewport);
+
   const hasCircle = selectedIds.some((id) => objects[id]?.type === "circle");
+
+  // Sync viewport state to store for AI agent placement
+  useEffect(() => {
+    setViewport({
+      centerX: (-stagePos.x + dimensions.width / 2) / scale,
+      centerY: (-stagePos.y + dimensions.height / 2) / scale,
+      width: dimensions.width / scale,
+      height: dimensions.height / scale,
+    });
+  }, [stagePos, scale, dimensions, setViewport]);
 
   // Keep stable refs so native Konva listeners always call the latest versions
   const broadcastLiveMoveRef = useRef(broadcastLiveMove);

@@ -34,3 +34,45 @@ export async function broadcastBoardEvent(
     });
   });
 }
+
+export interface PersistentChannel {
+  send(event: string, payload: Record<string, unknown>): void;
+  close(): void;
+}
+
+/**
+ * Create a persistent broadcast channel that subscribes once.
+ * Messages are queued until the channel is subscribed, then flushed.
+ * Call `close()` when done to tear down the channel.
+ */
+export function createPersistentChannel(boardId: string): PersistentChannel {
+  const supabase = getSupabaseServerClient();
+  const channelName = `board:${boardId}:objects:agent`;
+  const channel = supabase.channel(channelName);
+
+  let subscribed = false;
+  const pending: Array<{ event: string; payload: Record<string, unknown> }> = [];
+
+  channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      subscribed = true;
+      for (const msg of pending) {
+        channel.send({ type: "broadcast", event: msg.event, payload: msg.payload });
+      }
+      pending.length = 0;
+    }
+  });
+
+  return {
+    send(event: string, payload: Record<string, unknown>) {
+      if (subscribed) {
+        channel.send({ type: "broadcast", event, payload });
+      } else {
+        pending.push({ event, payload });
+      }
+    },
+    close() {
+      supabase.removeChannel(channel);
+    },
+  };
+}

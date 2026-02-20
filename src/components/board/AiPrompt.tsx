@@ -2,9 +2,11 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useBoardStore } from "@/stores/boardStore";
 
 export default function AiPrompt({ boardId }: { boardId: string }) {
   const { user } = useAuth();
+  const viewport = useBoardStore((s) => s.viewport);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,7 +29,7 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ prompt: prompt.trim() }),
+          body: JSON.stringify({ prompt: prompt.trim(), viewport }),
         });
 
         const data = await res.json();
@@ -44,7 +46,7 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
         setLoading(false);
       }
     },
-    [prompt, user, loading, boardId]
+    [prompt, user, loading, boardId, viewport]
   );
 
   if (!open) {

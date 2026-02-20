@@ -6,13 +6,18 @@ import { BoardObject, BoardObjectType } from "@/types/board";
 import { buildBoardObject, DEFAULT_COLORS, DEFAULT_SIZES } from "@/lib/board-object-defaults";
 import { boardObjectToRow, partialBoardObjectToRow, rowToBoardObject } from "@/lib/board-object-mapper";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { broadcastBoardEvent } from "@/lib/supabase/broadcast";
+import { createPersistentChannel, PersistentChannel } from "@/lib/supabase/broadcast";
 
 const openai = wrapOpenAI(new OpenAI());
 
 const SHAPE_TYPES: BoardObjectType[] = ["sticky", "rectangle", "circle", "text", "frame"];
 
-const SYSTEM_PROMPT = `You are an action-oriented assistant that manages objects on a collaborative whiteboard. Your job is to execute requests immediately using sensible defaults — NEVER ask clarifying questions. If the user doesn't specify a position, color, or size, use the defaults below.
+function buildSystemPrompt(viewport?: { centerX: number; centerY: number; width: number; height: number }): string {
+  const placementInstruction = viewport
+    ? `The user is currently viewing the area centered at (${Math.round(viewport.centerX)}, ${Math.round(viewport.centerY)}) with visible size ${Math.round(viewport.width)}x${Math.round(viewport.height)}. Place new shapes within this visible area.`
+    : `Start placing shapes around (400, 300) and offset from any existing objects so nothing overlaps.`;
+
+  return `You are an action-oriented assistant that manages objects on a collaborative whiteboard. Your job is to execute requests immediately using sensible defaults — NEVER ask clarifying questions. If the user doesn't specify a position, color, or size, use the defaults below.
 
 Available shape types: ${SHAPE_TYPES.join(", ")}
 
@@ -23,11 +28,12 @@ Default colors:
 ${SHAPE_TYPES.map((t) => `- ${t}: ${DEFAULT_COLORS[t]}`).join("\n")}
 
 The board coordinate system has (0, 0) at the top-left. X increases to the right, Y increases downward.
-Start placing shapes around (400, 300) and offset from any existing objects so nothing overlaps.
+${placementInstruction}
 
 When creating multiple shapes, arrange them in a visually pleasing layout (e.g., in a grid or row with spacing).
 
 Always call tools immediately to perform actions. Never respond with a question instead of acting. After performing actions, provide a brief summary of what you did.`;
+}
 
 const tools: ChatCompletionTool[] = [
   {
@@ -104,38 +110,6 @@ const tools: ChatCompletionTool[] = [
 
 // --- Tool execution functions (wrapped with traceable for LangSmith) ---
 
-const executeCreateShape = traceable(
-  async (
-    args: { type: BoardObjectType; x: number; y: number; text?: string; color?: string; width?: number; height?: number },
-    boardId: string,
-    userId: string
-  ): Promise<BoardObject> => {
-    const obj = buildBoardObject(args.type, args.x, args.y, {
-      boardId,
-      createdBy: userId,
-      ...(args.text != null ? { text: args.text } : {}),
-      ...(args.color ? { color: args.color } : {}),
-      ...(args.width ? { width: args.width } : {}),
-      ...(args.height ? { height: args.height } : {}),
-    });
-
-    const supabase = getSupabaseServerClient();
-    const row = boardObjectToRow(obj);
-    const { data, error } = await supabase
-      .from("board_objects")
-      .insert({ ...row, board_id: boardId, created_by: userId })
-      .select()
-      .single();
-
-    if (error) throw new Error(`Failed to create shape: ${error.message}`);
-
-    const created = rowToBoardObject(data);
-    await broadcastBoardEvent(boardId, "object:create", { object: created });
-    return created;
-  },
-  { name: "create_shape", run_type: "tool" }
-);
-
 const executeGetBoardObjects = traceable(
   async (boardId: string) => {
     const supabase = getSupabaseServerClient();
@@ -161,10 +135,94 @@ const executeGetBoardObjects = traceable(
   { name: "get_board_objects", run_type: "tool" }
 );
 
+interface ToolCallEntry {
+  toolCallId: string;
+  args: Record<string, unknown>;
+}
+
+const executeBatchCreate = traceable(
+  async (
+    items: ToolCallEntry[],
+    boardId: string,
+    userId: string,
+    channel: PersistentChannel
+  ): Promise<{ results: Array<{ toolCallId: string; content: string }>; objects: BoardObject[] }> => {
+    const objects = items.map((item) => {
+      const a = item.args as { type: BoardObjectType; x: number; y: number; text?: string; color?: string; width?: number; height?: number };
+      return buildBoardObject(a.type, a.x, a.y, {
+        boardId,
+        createdBy: userId,
+        ...(a.text != null ? { text: a.text } : {}),
+        ...(a.color ? { color: a.color } : {}),
+        ...(a.width ? { width: a.width } : {}),
+        ...(a.height ? { height: a.height } : {}),
+      });
+    });
+
+    const rows = objects.map((obj) => ({
+      ...boardObjectToRow(obj),
+      board_id: boardId,
+      created_by: userId,
+    }));
+
+    const supabase = getSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("board_objects")
+      .insert(rows)
+      .select();
+
+    if (error) throw new Error(`Failed to batch create shapes: ${error.message}`);
+
+    const created = data.map((row) => rowToBoardObject(row));
+    for (const obj of created) {
+      channel.send("object:create", { object: obj });
+    }
+
+    return {
+      results: items.map((item, i) => ({
+        toolCallId: item.toolCallId,
+        content: JSON.stringify({ ok: true, id: created[i].id }),
+      })),
+      objects: created,
+    };
+  },
+  { name: "batch_create_shapes", run_type: "tool" }
+);
+
+const executeBatchDelete = traceable(
+  async (
+    items: ToolCallEntry[],
+    boardId: string,
+    channel: PersistentChannel
+  ): Promise<Array<{ toolCallId: string; content: string }>> => {
+    const ids = items.map((item) => item.args.id as string);
+
+    const supabase = getSupabaseServerClient();
+    const { error } = await supabase
+      .from("board_objects")
+      .delete()
+      .eq("board_id", boardId)
+      .in("id", ids);
+
+    if (error) throw new Error(`Failed to batch delete objects: ${error.message}`);
+
+    for (const id of ids) {
+      channel.send("object:delete", { objectId: id });
+    }
+
+    return items.map((item) => ({
+      toolCallId: item.toolCallId,
+      content: JSON.stringify({ ok: true }),
+    }));
+  },
+  { name: "batch_delete_objects", run_type: "tool" }
+);
+
 const executeUpdateObject = traceable(
   async (
     args: { id: string; color?: string; x?: number; y?: number; text?: string; width?: number; height?: number },
-    boardId: string
+    boardId: string,
+    channel: PersistentChannel
   ) => {
     const { id, ...changes } = args;
     const row = partialBoardObjectToRow({
@@ -184,27 +242,10 @@ const executeUpdateObject = traceable(
     if (error) throw new Error(`Failed to update object: ${error.message}`);
 
     const updated = rowToBoardObject(data);
-    await broadcastBoardEvent(boardId, "object:update", { objectId: id, changes });
+    channel.send("object:update", { objectId: id, changes });
     return updated;
   },
   { name: "update_object", run_type: "tool" }
-);
-
-const executeDeleteObject = traceable(
-  async (args: { id: string }, boardId: string) => {
-    const supabase = getSupabaseServerClient();
-    const { error } = await supabase
-      .from("board_objects")
-      .delete()
-      .eq("id", args.id)
-      .eq("board_id", boardId);
-
-    if (error) throw new Error(`Failed to delete object: ${error.message}`);
-
-    await broadcastBoardEvent(boardId, "object:delete", { objectId: args.id });
-    return { deleted: args.id };
-  },
-  { name: "delete_object", run_type: "tool" }
 );
 
 // --- Main agent entry point ---
@@ -216,11 +257,13 @@ export interface AgentResult {
   createdObjects: BoardObject[];
 }
 
-export async function runBoardAgent(
-  prompt: string,
-  boardId: string,
-  userId: string
-): Promise<AgentResult> {
+export const runBoardAgent = traceable(
+  async function runBoardAgent(
+    prompt: string,
+    boardId: string,
+    userId: string,
+    viewport?: { centerX: number; centerY: number; width: number; height: number }
+  ): Promise<AgentResult> {
   // Pre-fetch existing objects so the LLM can avoid overlapping placements
   const existingObjects = await executeGetBoardObjects(boardId);
   const boardSnapshot =
@@ -228,7 +271,7 @@ export async function runBoardAgent(
       ? `Current objects on the board:\n${JSON.stringify(existingObjects)}`
       : "The board is empty.";
 
-  const systemContent = `${SYSTEM_PROMPT}\n\n${boardSnapshot}\n\nWhen placing new shapes, choose positions that don't overlap with existing objects.`;
+  const systemContent = `${buildSystemPrompt(viewport)}\n\n${boardSnapshot}\n\nWhen placing new shapes, choose positions that don't overlap with existing objects.`;
 
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: systemContent },
@@ -236,7 +279,9 @@ export async function runBoardAgent(
   ];
 
   const createdObjects: BoardObject[] = [];
+  const channel = createPersistentChannel(boardId);
 
+  try {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -256,63 +301,98 @@ export async function runBoardAgent(
       };
     }
 
-    // Execute tool calls in parallel, grouped by operation type for correct ordering
+    // Group tool calls by operation type
     const toolCalls = assistantMessage.tool_calls.filter((tc) => tc.type === "function");
 
-    const executionOrder = ["get_board_objects", "delete_object", "create_shape", "update_object"];
-    const grouped = new Map<string, typeof toolCalls>();
+    const grouped = new Map<string, Array<{ toolCallId: string; args: Record<string, unknown> }>>();
     for (const tc of toolCalls) {
       const name = tc.function.name;
       if (!grouped.has(name)) grouped.set(name, []);
-      grouped.get(name)!.push(tc);
+      grouped.get(name)!.push({
+        toolCallId: tc.id,
+        args: JSON.parse(tc.function.arguments),
+      });
     }
 
     const toolResults: ChatCompletionMessageParam[] = [];
+
+    // Execute in order: reads → deletes → creates → updates
+    const executionOrder = ["get_board_objects", "delete_object", "create_shape", "update_object"];
 
     for (const opName of executionOrder) {
       const group = grouped.get(opName);
       if (!group) continue;
 
-      const results = await Promise.all(
-        group.map(async (toolCall) => {
-          const args = JSON.parse(toolCall.function.arguments);
-          let result: unknown;
-
-          try {
-            switch (opName) {
-              case "create_shape": {
-                const obj = await executeCreateShape(args, boardId, userId);
-                createdObjects.push(obj);
-                result = { success: true, id: obj.id, type: obj.type };
-                break;
-              }
-              case "get_board_objects":
-                result = await executeGetBoardObjects(boardId);
-                break;
-              case "update_object":
-                result = await executeUpdateObject(args, boardId);
-                result = { success: true, id: args.id };
-                break;
-              case "delete_object":
-                result = await executeDeleteObject(args, boardId);
-                result = { success: true, deleted: args.id };
-                break;
-              default:
-                result = { error: `Unknown tool: ${opName}` };
-            }
-          } catch (err) {
-            result = { error: err instanceof Error ? err.message : "Unknown error" };
+      try {
+        switch (opName) {
+          case "get_board_objects": {
+            // Execute reads in parallel (typically just one)
+            const results = await Promise.all(
+              group.map(async (entry) => {
+                const result = await executeGetBoardObjects(boardId);
+                return {
+                  role: "tool" as const,
+                  tool_call_id: entry.toolCallId,
+                  content: JSON.stringify(result),
+                };
+              })
+            );
+            toolResults.push(...results);
+            break;
           }
 
-          return {
-            role: "tool" as const,
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(result),
-          };
-        })
-      );
+          case "delete_object": {
+            const batchResults = await executeBatchDelete(group, boardId, channel);
+            for (const r of batchResults) {
+              toolResults.push({ role: "tool" as const, tool_call_id: r.toolCallId, content: r.content });
+            }
+            break;
+          }
 
-      toolResults.push(...results);
+          case "create_shape": {
+            const { results, objects } = await executeBatchCreate(group, boardId, userId, channel);
+            createdObjects.push(...objects);
+            for (const r of results) {
+              toolResults.push({ role: "tool" as const, tool_call_id: r.toolCallId, content: r.content });
+            }
+            break;
+          }
+
+          case "update_object": {
+            // Updates remain individual (different columns per row) but share the persistent channel
+            const results = await Promise.all(
+              group.map(async (entry) => {
+                try {
+                  await executeUpdateObject(
+                    entry.args as { id: string; color?: string; x?: number; y?: number; text?: string; width?: number; height?: number },
+                    boardId,
+                    channel
+                  );
+                  return {
+                    role: "tool" as const,
+                    tool_call_id: entry.toolCallId,
+                    content: JSON.stringify({ ok: true, id: entry.args.id }),
+                  };
+                } catch (err) {
+                  return {
+                    role: "tool" as const,
+                    tool_call_id: entry.toolCallId,
+                    content: JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }),
+                  };
+                }
+              })
+            );
+            toolResults.push(...results);
+            break;
+          }
+        }
+      } catch (err) {
+        // If a batch operation fails, report the error for all tool calls in that group
+        const errorMsg = JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" });
+        for (const entry of group) {
+          toolResults.push({ role: "tool" as const, tool_call_id: entry.toolCallId, content: errorMsg });
+        }
+      }
     }
 
     // Handle any unknown tool types not in executionOrder
@@ -333,4 +413,9 @@ export async function runBoardAgent(
     message: "Reached maximum number of turns. Some actions may not have completed.",
     createdObjects,
   };
-}
+  } finally {
+    channel.close();
+  }
+  },
+  { name: "run_board_agent", run_type: "chain" }
+);

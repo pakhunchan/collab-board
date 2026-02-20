@@ -30,7 +30,8 @@ export async function POST(
   }
 
   try {
-    const result = await runBoardAgent(prompt, params.id, decoded.uid);
+    const viewport = body.viewport;
+    const result = await runBoardAgent(prompt, params.id, decoded.uid, viewport);
     return NextResponse.json(result);
   } catch (err) {
     console.error("AI agent error:", err);
