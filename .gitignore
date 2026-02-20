@@ -33,6 +33,9 @@ yarn-error.log*
 lessons-learned.md
 potential_features.md
 
+# examples
+/examples
+
 # vercel
 .vercel
 
