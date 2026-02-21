@@ -3,7 +3,7 @@ import { wrapOpenAI } from "langsmith/wrappers";
 import { traceable } from "langsmith/traceable";
 import { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import { BoardObject, BoardObjectType } from "@/types/board";
-import { buildBoardObject } from "@/lib/board-object-defaults";
+import { buildBoardObject, DEFAULT_SIZES } from "@/lib/board-object-defaults";
 import { boardObjectToRow, partialBoardObjectToRow, rowToBoardObject } from "@/lib/board-object-mapper";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createPersistentChannel, PersistentChannel } from "@/lib/supabase/broadcast";
@@ -22,7 +22,10 @@ function buildSystemPrompt(viewport?: { centerX: number; centerY: number; width:
       }
     : { minX: 100, maxX: 700, minY: 100, maxY: 500 };
 
-  return `You manage objects on a collaborative whiteboard. Execute requests immediately using tool defaults — never ask clarifying questions.
+  return `You manage objects on a collaborative whiteboard. Always use tools to place content on the board — never respond with plain text answers. Execute requests immediately using tool defaults — never ask clarifying questions.
+
+x and y are TOP-LEFT corner coordinates. Default sizes (width x height):
+sticky: 200x200, rectangle: 240x160, circle: 160x160, text: 200x40, frame: 400x300
 
 Place shapes within:
 x-min: ${bounds.minX}
@@ -30,7 +33,8 @@ x-max: ${bounds.maxX}
 y-min: ${bounds.minY}
 y-max: ${bounds.maxY}
 
-Arrange multiple shapes towards the center, in a grid, with spacing. Avoid overlapping existing objects.`;
+When placing multiple objects, ensure at least 20px gap between all edges. An object at (x, y) with size (w, h) occupies from (x, y) to (x+w, y+h). Two objects overlap if their rectangles intersect.
+Arrange multiple shapes towards the center, in a grid, with spacing. Do NOT create objects that touch or overlap with other objects.`;
 }
 
 const tools: ChatCompletionTool[] = [
@@ -57,8 +61,8 @@ const tools: ChatCompletionTool[] = [
                     properties: {
                       type: { type: "string", enum: SHAPE_TYPES, description: "Shape type (batch_create)" },
                       id: { type: "string", description: "Object ID (batch_update)" },
-                      x: { type: "number", description: "X position" },
-                      y: { type: "number", description: "Y position" },
+                      x: { type: "number", description: "X position (top-left corner)" },
+                      y: { type: "number", description: "Y position (top-left corner)" },
                       text: { type: "string", description: "Text content" },
                       color: { type: "string", description: "Hex color" },
                       width: { type: "number", description: "Width" },
@@ -104,6 +108,125 @@ const executeGetBoardObjects = traceable(
   { name: "get_board_objects", run_type: "tool" }
 );
 
+// --- Spacing enforcement to prevent overlapping objects ---
+
+const MIN_GAP = 20;
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function rectsOverlap(a: Rect, b: Rect, gap: number): boolean {
+  return (
+    a.x < b.x + b.width + gap &&
+    a.x + a.width + gap > b.x &&
+    a.y < b.y + b.height + gap &&
+    a.y + a.height + gap > b.y
+  );
+}
+
+function hasAnyOverlap(newObjects: Rect[], existingObjects: Rect[], gap: number): boolean {
+  for (let i = 0; i < newObjects.length; i++) {
+    for (let j = i + 1; j < newObjects.length; j++) {
+      if (rectsOverlap(newObjects[i], newObjects[j], gap)) return true;
+    }
+    for (const ex of existingObjects) {
+      if (rectsOverlap(newObjects[i], ex, gap)) return true;
+    }
+  }
+  return false;
+}
+
+function computeMTV(a: Rect, b: Rect, gap: number): { dx: number; dy: number } {
+  const overlapX = Math.min(a.x + a.width + gap, b.x + b.width + gap) - Math.max(a.x, b.x);
+  const overlapY = Math.min(a.y + a.height + gap, b.y + b.height + gap) - Math.max(a.y, b.y);
+
+  if (overlapX <= 0 || overlapY <= 0) return { dx: 0, dy: 0 };
+
+  if (overlapX < overlapY) {
+    const centerA = a.x + a.width / 2;
+    const centerB = b.x + b.width / 2;
+    return { dx: centerA < centerB ? -overlapX : overlapX, dy: 0 };
+  } else {
+    const centerA = a.y + a.height / 2;
+    const centerB = b.y + b.height / 2;
+    return { dx: 0, dy: centerA < centerB ? -overlapY : overlapY };
+  }
+}
+
+function enforceSpacing(newObjects: BoardObject[], existingObjects: Rect[]): void {
+  if (newObjects.length === 0) return;
+
+  // Phase 1: Early exit if no overlaps
+  const newRects: Rect[] = newObjects.map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+  if (!hasAnyOverlap(newRects, existingObjects, MIN_GAP)) return;
+
+  // Phase 2: Grid layout for new objects
+  const n = newObjects.length;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+
+  let maxW = 0;
+  let maxH = 0;
+  for (const obj of newObjects) {
+    if (obj.width > maxW) maxW = obj.width;
+    if (obj.height > maxH) maxH = obj.height;
+  }
+
+  const cellW = maxW + MIN_GAP;
+  const cellH = maxH + MIN_GAP;
+
+  // Centroid of LLM's intended positions
+  let cx = 0;
+  let cy = 0;
+  for (const obj of newObjects) {
+    cx += obj.x + obj.width / 2;
+    cy += obj.y + obj.height / 2;
+  }
+  cx /= n;
+  cy /= n;
+
+  const gridW = cols * cellW;
+  const gridH = rows * cellH;
+  const originX = cx - gridW / 2;
+  const originY = cy - gridH / 2;
+
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const obj = newObjects[i];
+    // Center each object within its cell
+    obj.x = Math.round(originX + col * cellW + (cellW - obj.width) / 2);
+    obj.y = Math.round(originY + row * cellH + (cellH - obj.height) / 2);
+  }
+
+  // Phase 3: Resolve overlaps with existing objects using MTV
+  const placed: Rect[] = [...existingObjects];
+  for (const obj of newObjects) {
+    let maxAttempts = 20;
+    while (maxAttempts-- > 0) {
+      let worst: { dx: number; dy: number } | null = null;
+      let worstMag = 0;
+      for (const p of placed) {
+        if (!rectsOverlap(obj, p, MIN_GAP)) continue;
+        const mtv = computeMTV(obj, p, MIN_GAP);
+        const mag = Math.abs(mtv.dx) + Math.abs(mtv.dy);
+        if (mag > worstMag) {
+          worst = mtv;
+          worstMag = mag;
+        }
+      }
+      if (!worst) break;
+      obj.x = Math.round(obj.x + worst.dx);
+      obj.y = Math.round(obj.y + worst.dy);
+    }
+    placed.push({ x: obj.x, y: obj.y, width: obj.width, height: obj.height });
+  }
+}
+
 interface CreateAction {
   type: BoardObjectType;
   x: number;
@@ -119,18 +242,26 @@ const executeBatchCreate = traceable(
     actions: CreateAction[],
     boardId: string,
     userId: string,
-    channel: PersistentChannel
+    channel: PersistentChannel,
+    existingObjects: Rect[]
   ): Promise<{ ids: string[]; objects: BoardObject[] }> => {
-    const objects = actions.map((a) =>
-      buildBoardObject(a.type, a.x, a.y, {
+    const objects = actions.map((a) => {
+      const size = DEFAULT_SIZES[a.type];
+      const w = a.width ?? size.width;
+      const h = a.height ?? size.height;
+      return buildBoardObject(a.type, 0, 0, {
         boardId,
         createdBy: userId,
+        x: a.x,
+        y: a.y,
+        width: w,
+        height: h,
         ...(a.text != null ? { text: a.text } : {}),
         ...(a.color ? { color: a.color } : {}),
-        ...(a.width ? { width: a.width } : {}),
-        ...(a.height ? { height: a.height } : {}),
-      })
-    );
+      });
+    });
+
+    enforceSpacing(objects, existingObjects);
 
     const rows = objects.map((obj) => ({
       ...boardObjectToRow(obj),
@@ -244,9 +375,10 @@ export const runBoardAgent = traceable(
   try {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-nano",
       messages,
       tools,
+      tool_choice: turn === 0 ? "required" : "auto",
     });
 
     const choice = response.choices[0];
@@ -296,7 +428,7 @@ export const runBoardAgent = traceable(
         }
 
         if (createItems.length > 0) {
-          const { ids, objects } = await executeBatchCreate(createItems, boardId, userId, channel);
+          const { ids, objects } = await executeBatchCreate(createItems, boardId, userId, channel, existingObjects);
           createdObjects.push(...objects);
           for (const id of ids) {
             results.push({ action: "create", ok: true, id });
