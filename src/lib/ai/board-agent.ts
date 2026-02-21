@@ -3,7 +3,7 @@ import { wrapOpenAI } from "langsmith/wrappers";
 import { traceable } from "langsmith/traceable";
 import { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import { BoardObject, BoardObjectType } from "@/types/board";
-import { buildBoardObject, DEFAULT_COLORS, DEFAULT_SIZES } from "@/lib/board-object-defaults";
+import { buildBoardObject } from "@/lib/board-object-defaults";
 import { boardObjectToRow, partialBoardObjectToRow, rowToBoardObject } from "@/lib/board-object-mapper";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createPersistentChannel, PersistentChannel } from "@/lib/supabase/broadcast";
@@ -13,26 +13,19 @@ const openai = wrapOpenAI(new OpenAI());
 const SHAPE_TYPES: BoardObjectType[] = ["sticky", "rectangle", "circle", "text", "frame"];
 
 function buildSystemPrompt(viewport?: { centerX: number; centerY: number; width: number; height: number }): string {
-  const placementInstruction = viewport
-    ? `The user is currently viewing the area centered at (${Math.round(viewport.centerX)}, ${Math.round(viewport.centerY)}) with visible size ${Math.round(viewport.width)}x${Math.round(viewport.height)}. Place new shapes within this visible area.`
-    : `Start placing shapes around (400, 300) and offset from any existing objects so nothing overlaps.`;
+  const bounds = viewport
+    ? {
+        minX: Math.round(viewport.centerX - viewport.width / 2),
+        maxX: Math.round(viewport.centerX + viewport.width / 2),
+        minY: Math.round(viewport.centerY - viewport.height / 2),
+        maxY: Math.round(viewport.centerY + viewport.height / 2),
+      }
+    : { minX: 100, maxX: 700, minY: 100, maxY: 500 };
 
-  return `You are an action-oriented assistant that manages objects on a collaborative whiteboard. Your job is to execute requests immediately using sensible defaults — NEVER ask clarifying questions. If the user doesn't specify a position, color, or size, use the defaults below.
+  return `You manage objects on a collaborative whiteboard. Execute requests immediately using tool defaults — never ask clarifying questions.
 
-Available shape types: ${SHAPE_TYPES.join(", ")}
-
-Default sizes (width x height):
-${SHAPE_TYPES.map((t) => `- ${t}: ${DEFAULT_SIZES[t].width}x${DEFAULT_SIZES[t].height}`).join("\n")}
-
-Default colors:
-${SHAPE_TYPES.map((t) => `- ${t}: ${DEFAULT_COLORS[t]}`).join("\n")}
-
-The board coordinate system has (0, 0) at the top-left. X increases to the right, Y increases downward.
-${placementInstruction}
-
-When creating multiple shapes, arrange them in a visually pleasing layout (e.g., in a grid or row with spacing).
-
-Always call tools immediately to perform actions. Never respond with a question instead of acting. After performing actions, provide a brief summary of what you did.`;
+Place shapes within x: ${bounds.minX}–${bounds.maxX}, y: ${bounds.minY}–${bounds.maxY}.
+Arrange multiple shapes in a grid or row with spacing. Avoid overlapping existing objects.`;
 }
 
 const tools: ChatCompletionTool[] = [
@@ -52,9 +45,9 @@ const tools: ChatCompletionTool[] = [
           x: { type: "number", description: "X position (center of shape)" },
           y: { type: "number", description: "Y position (center of shape)" },
           text: { type: "string", description: "Text content (for sticky notes, text, and frames)" },
-          color: { type: "string", description: "Color as hex string (e.g. #FF0000)" },
-          width: { type: "number", description: "Width override (optional)" },
-          height: { type: "number", description: "Height override (optional)" },
+          color: { type: "string", description: "Hex color", default: "type-dependent: sticky=#FFEB3B, rectangle=#90CAF9, circle=#CE93D8, text=#333333, frame=#4A90D9" },
+          width: { type: "number", description: "Width", default: "type-dependent: sticky=200, rectangle=240, circle=160, text=200, frame=400" },
+          height: { type: "number", description: "Height", default: "type-dependent: sticky=200, rectangle=160, circle=160, text=40, frame=300" },
         },
         required: ["type", "x", "y"],
       },
@@ -271,7 +264,7 @@ export const runBoardAgent = traceable(
       ? `Current objects on the board:\n${JSON.stringify(existingObjects)}`
       : "The board is empty.";
 
-  const systemContent = `${buildSystemPrompt(viewport)}\n\n${boardSnapshot}\n\nWhen placing new shapes, choose positions that don't overlap with existing objects.`;
+  const systemContent = `${buildSystemPrompt(viewport)}\n\n${boardSnapshot}`;
 
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: systemContent },
@@ -284,7 +277,7 @@ export const runBoardAgent = traceable(
   try {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages,
       tools,
     });
