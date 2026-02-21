@@ -37,70 +37,31 @@ const tools: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "create_shape",
-      description: "Create a new shape on the board",
+      name: "apply_board_actions",
+      description: "Apply one or more actions to the board. Batch multiple actions into a single call.",
       parameters: {
         type: "object",
         properties: {
-          type: {
-            type: "string",
-            enum: SHAPE_TYPES,
-            description: "The type of shape to create",
+          actions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                action: { type: "string", enum: ["create", "update", "delete", "get"], description: "Action type" },
+                type: { type: "string", enum: SHAPE_TYPES, description: "Shape type (create only)" },
+                id: { type: "string", description: "Object ID (update/delete only)" },
+                x: { type: "number", description: "X position" },
+                y: { type: "number", description: "Y position" },
+                text: { type: "string", description: "Text content" },
+                color: { type: "string", description: "Hex color", default: "type-dependent: sticky=#FFEB3B, rectangle=#90CAF9, circle=#CE93D8, text=#333333, frame=#4A90D9" },
+                width: { type: "number", description: "Width", default: "type-dependent: sticky=200, rectangle=240, circle=160, text=200, frame=400" },
+                height: { type: "number", description: "Height", default: "type-dependent: sticky=200, rectangle=160, circle=160, text=40, frame=300" },
+              },
+              required: ["action"],
+            },
           },
-          x: { type: "number", description: "X position (center of shape)" },
-          y: { type: "number", description: "Y position (center of shape)" },
-          text: { type: "string", description: "Text content (for sticky notes, text, and frames)" },
-          color: { type: "string", description: "Hex color", default: "type-dependent: sticky=#FFEB3B, rectangle=#90CAF9, circle=#CE93D8, text=#333333, frame=#4A90D9" },
-          width: { type: "number", description: "Width", default: "type-dependent: sticky=200, rectangle=240, circle=160, text=200, frame=400" },
-          height: { type: "number", description: "Height", default: "type-dependent: sticky=200, rectangle=160, circle=160, text=40, frame=300" },
         },
-        required: ["type", "x", "y"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_board_objects",
-      description: "Get all objects currently on the board",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "update_object",
-      description: "Update an existing object on the board",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string", description: "The ID of the object to update" },
-          color: { type: "string", description: "New color as hex string" },
-          x: { type: "number", description: "New X position" },
-          y: { type: "number", description: "New Y position" },
-          text: { type: "string", description: "New text content" },
-          width: { type: "number", description: "New width" },
-          height: { type: "number", description: "New height" },
-        },
-        required: ["id"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_object",
-      description: "Delete an object from the board",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string", description: "The ID of the object to delete" },
-        },
-        required: ["id"],
+        required: ["actions"],
       },
     },
   },
@@ -133,29 +94,33 @@ const executeGetBoardObjects = traceable(
   { name: "get_board_objects", run_type: "tool" }
 );
 
-interface ToolCallEntry {
-  toolCallId: string;
-  args: Record<string, unknown>;
+interface CreateAction {
+  type: BoardObjectType;
+  x: number;
+  y: number;
+  text?: string;
+  color?: string;
+  width?: number;
+  height?: number;
 }
 
 const executeBatchCreate = traceable(
   async (
-    items: ToolCallEntry[],
+    actions: CreateAction[],
     boardId: string,
     userId: string,
     channel: PersistentChannel
-  ): Promise<{ results: Array<{ toolCallId: string; content: string }>; objects: BoardObject[] }> => {
-    const objects = items.map((item) => {
-      const a = item.args as { type: BoardObjectType; x: number; y: number; text?: string; color?: string; width?: number; height?: number };
-      return buildBoardObject(a.type, a.x, a.y, {
+  ): Promise<{ ids: string[]; objects: BoardObject[] }> => {
+    const objects = actions.map((a) =>
+      buildBoardObject(a.type, a.x, a.y, {
         boardId,
         createdBy: userId,
         ...(a.text != null ? { text: a.text } : {}),
         ...(a.color ? { color: a.color } : {}),
         ...(a.width ? { width: a.width } : {}),
         ...(a.height ? { height: a.height } : {}),
-      });
-    });
+      })
+    );
 
     const rows = objects.map((obj) => ({
       ...boardObjectToRow(obj),
@@ -176,25 +141,17 @@ const executeBatchCreate = traceable(
       channel.send("object:create", { object: obj });
     }
 
-    return {
-      results: items.map((item, i) => ({
-        toolCallId: item.toolCallId,
-        content: JSON.stringify({ ok: true, id: created[i].id }),
-      })),
-      objects: created,
-    };
+    return { ids: created.map((o) => o.id), objects: created };
   },
   { name: "batch_create_shapes", run_type: "tool" }
 );
 
 const executeBatchDelete = traceable(
   async (
-    items: ToolCallEntry[],
+    ids: string[],
     boardId: string,
     channel: PersistentChannel
-  ): Promise<Array<{ toolCallId: string; content: string }>> => {
-    const ids = items.map((item) => item.args.id as string);
-
+  ): Promise<void> => {
     const supabase = getSupabaseServerClient();
     const { error } = await supabase
       .from("board_objects")
@@ -207,11 +164,6 @@ const executeBatchDelete = traceable(
     for (const id of ids) {
       channel.send("object:delete", { objectId: id });
     }
-
-    return items.map((item) => ({
-      toolCallId: item.toolCallId,
-      content: JSON.stringify({ ok: true }),
-    }));
   },
   { name: "batch_delete_objects", run_type: "tool" }
 );
@@ -299,112 +251,76 @@ export const runBoardAgent = traceable(
       };
     }
 
-    // Group tool calls by operation type
-    const toolCalls = assistantMessage.tool_calls.filter((tc) => tc.type === "function");
+    const toolCall = assistantMessage.tool_calls.find((tc) => tc.type === "function");
+    if (!toolCall) continue;
+    const args = JSON.parse(toolCall.function.arguments) as { actions: Array<Record<string, unknown>> };
+    const actions = args.actions;
 
-    const grouped = new Map<string, Array<{ toolCallId: string; args: Record<string, unknown> }>>();
-    for (const tc of toolCalls) {
-      const name = tc.function.name;
-      if (!grouped.has(name)) grouped.set(name, []);
-      grouped.get(name)!.push({
-        toolCallId: tc.id,
-        args: JSON.parse(tc.function.arguments),
-      });
-    }
+    // Group actions by type
+    const gets = actions.filter((a) => a.action === "get");
+    const deletes = actions.filter((a) => a.action === "delete");
+    const creates = actions.filter((a) => a.action === "create");
+    const updates = actions.filter((a) => a.action === "update");
 
-    const toolResults: ChatCompletionMessageParam[] = [];
+    const results: Array<{ action: string; ok?: boolean; id?: string; error?: string; data?: unknown }> = [];
 
-    // Execute in order: reads → deletes → creates → updates
-    const executionOrder = ["get_board_objects", "delete_object", "create_shape", "update_object"];
+    try {
+      // Execute in order: get → delete → create → update
+      if (gets.length > 0) {
+        const data = await executeGetBoardObjects(boardId);
+        results.push({ action: "get", ok: true, data });
+      }
 
-    for (const opName of executionOrder) {
-      const group = grouped.get(opName);
-      if (!group) continue;
-
-      try {
-        switch (opName) {
-          case "get_board_objects": {
-            // Execute reads in parallel (typically just one)
-            const results = await Promise.all(
-              group.map(async (entry) => {
-                const result = await executeGetBoardObjects(boardId);
-                return {
-                  role: "tool" as const,
-                  tool_call_id: entry.toolCallId,
-                  content: JSON.stringify(result),
-                };
-              })
-            );
-            toolResults.push(...results);
-            break;
-          }
-
-          case "delete_object": {
-            const batchResults = await executeBatchDelete(group, boardId, channel);
-            for (const r of batchResults) {
-              toolResults.push({ role: "tool" as const, tool_call_id: r.toolCallId, content: r.content });
-            }
-            break;
-          }
-
-          case "create_shape": {
-            const { results, objects } = await executeBatchCreate(group, boardId, userId, channel);
-            createdObjects.push(...objects);
-            for (const r of results) {
-              toolResults.push({ role: "tool" as const, tool_call_id: r.toolCallId, content: r.content });
-            }
-            break;
-          }
-
-          case "update_object": {
-            // Updates remain individual (different columns per row) but share the persistent channel
-            const results = await Promise.all(
-              group.map(async (entry) => {
-                try {
-                  await executeUpdateObject(
-                    entry.args as { id: string; color?: string; x?: number; y?: number; text?: string; width?: number; height?: number },
-                    boardId,
-                    channel
-                  );
-                  return {
-                    role: "tool" as const,
-                    tool_call_id: entry.toolCallId,
-                    content: JSON.stringify({ ok: true, id: entry.args.id }),
-                  };
-                } catch (err) {
-                  return {
-                    role: "tool" as const,
-                    tool_call_id: entry.toolCallId,
-                    content: JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }),
-                  };
-                }
-              })
-            );
-            toolResults.push(...results);
-            break;
-          }
-        }
-      } catch (err) {
-        // If a batch operation fails, report the error for all tool calls in that group
-        const errorMsg = JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" });
-        for (const entry of group) {
-          toolResults.push({ role: "tool" as const, tool_call_id: entry.toolCallId, content: errorMsg });
+      if (deletes.length > 0) {
+        const ids = deletes.map((a) => a.id as string);
+        await executeBatchDelete(ids, boardId, channel);
+        for (const id of ids) {
+          results.push({ action: "delete", ok: true, id });
         }
       }
-    }
 
-    // Handle any unknown tool types not in executionOrder
-    for (const tc of toolCalls) {
-      if (!executionOrder.includes(tc.function.name)) {
-        toolResults.push({
-          role: "tool" as const,
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: `Unknown tool: ${tc.function.name}` }),
-        });
+      if (creates.length > 0) {
+        const createActions = creates.map((a) => ({
+          type: a.type as BoardObjectType,
+          x: a.x as number,
+          y: a.y as number,
+          text: a.text as string | undefined,
+          color: a.color as string | undefined,
+          width: a.width as number | undefined,
+          height: a.height as number | undefined,
+        }));
+        const { ids, objects } = await executeBatchCreate(createActions, boardId, userId, channel);
+        createdObjects.push(...objects);
+        for (const id of ids) {
+          results.push({ action: "create", ok: true, id });
+        }
       }
+
+      if (updates.length > 0) {
+        await Promise.all(
+          updates.map(async (a) => {
+            try {
+              await executeUpdateObject(
+                a as unknown as { id: string; color?: string; x?: number; y?: number; text?: string; width?: number; height?: number },
+                boardId,
+                channel
+              );
+              results.push({ action: "update", ok: true, id: a.id as string });
+            } catch (err) {
+              results.push({ action: "update", id: a.id as string, error: err instanceof Error ? err.message : "Unknown error" });
+            }
+          })
+        );
+      }
+    } catch (err) {
+      results.push({ action: "error", error: err instanceof Error ? err.message : "Unknown error" });
     }
 
-    messages.push(...toolResults);
+    messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      content: JSON.stringify(results),
+    });
   }
 
   return {
