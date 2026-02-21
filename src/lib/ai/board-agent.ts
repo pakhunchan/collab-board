@@ -24,8 +24,13 @@ function buildSystemPrompt(viewport?: { centerX: number; centerY: number; width:
 
   return `You manage objects on a collaborative whiteboard. Execute requests immediately using tool defaults — never ask clarifying questions.
 
-Place shapes within x: ${bounds.minX}–${bounds.maxX}, y: ${bounds.minY}–${bounds.maxY}.
-Arrange multiple shapes in a grid or row with spacing. Avoid overlapping existing objects.`;
+Place shapes within:
+x-min: ${bounds.minX}
+x-max: ${bounds.maxX}
+y-min: ${bounds.minY}
+y-max: ${bounds.maxY}
+
+Arrange multiple shapes towards the center, in a grid, with spacing. Avoid overlapping existing objects.`;
 }
 
 const tools: ChatCompletionTool[] = [
