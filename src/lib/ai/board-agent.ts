@@ -47,15 +47,25 @@ const tools: ChatCompletionTool[] = [
             items: {
               type: "object",
               properties: {
-                action: { type: "string", enum: ["create", "update", "delete", "get"], description: "Action type" },
-                type: { type: "string", enum: SHAPE_TYPES, description: "Shape type (create only)" },
-                id: { type: "string", description: "Object ID (update/delete only)" },
-                x: { type: "number", description: "X position" },
-                y: { type: "number", description: "Y position" },
-                text: { type: "string", description: "Text content" },
-                color: { type: "string", description: "Hex color", default: "type-dependent: sticky=#FFEB3B, rectangle=#90CAF9, circle=#CE93D8, text=#333333, frame=#4A90D9" },
-                width: { type: "number", description: "Width", default: "type-dependent: sticky=200, rectangle=240, circle=160, text=200, frame=400" },
-                height: { type: "number", description: "Height", default: "type-dependent: sticky=200, rectangle=160, circle=160, text=40, frame=300" },
+                action: { type: "string", enum: ["get", "batch_create", "batch_delete", "batch_update"], description: "Action type" },
+                ids: { type: "array", items: { type: "string" }, description: "Object IDs (batch_delete)" },
+                items: {
+                  type: "array",
+                  description: "batch_create: [{type, x, y, text?, color?, width?, height?}], batch_update: [{id, ...changes}]",
+                  items: {
+                    type: "object",
+                    properties: {
+                      type: { type: "string", enum: SHAPE_TYPES, description: "Shape type (batch_create)" },
+                      id: { type: "string", description: "Object ID (batch_update)" },
+                      x: { type: "number", description: "X position" },
+                      y: { type: "number", description: "Y position" },
+                      text: { type: "string", description: "Text content" },
+                      color: { type: "string", description: "Hex color" },
+                      width: { type: "number", description: "Width" },
+                      height: { type: "number", description: "Height" },
+                    },
+                  },
+                },
               },
               required: ["action"],
             },
@@ -251,76 +261,74 @@ export const runBoardAgent = traceable(
       };
     }
 
-    const toolCall = assistantMessage.tool_calls.find((tc) => tc.type === "function");
-    if (!toolCall) continue;
-    const args = JSON.parse(toolCall.function.arguments) as { actions: Array<Record<string, unknown>> };
-    const actions = args.actions;
+    // Process ALL tool calls — OpenAI requires a tool response for each tool_call_id
+    for (const toolCall of assistantMessage.tool_calls) {
+      if (toolCall.type !== "function") continue;
 
-    // Group actions by type
-    const gets = actions.filter((a) => a.action === "get");
-    const deletes = actions.filter((a) => a.action === "delete");
-    const creates = actions.filter((a) => a.action === "create");
-    const updates = actions.filter((a) => a.action === "update");
+      const args = JSON.parse(toolCall.function.arguments) as { actions: Array<Record<string, unknown>> };
+      const actions = args.actions;
 
-    const results: Array<{ action: string; ok?: boolean; id?: string; error?: string; data?: unknown }> = [];
+      const gets = actions.filter((a) => a.action === "get");
+      const deleteIds = actions
+        .filter((a) => a.action === "batch_delete")
+        .flatMap((a) => a.ids as string[]);
+      const createItems = actions
+        .filter((a) => a.action === "batch_create")
+        .flatMap((a) => a.items as CreateAction[]);
+      const updateItems = actions
+        .filter((a) => a.action === "batch_update")
+        .flatMap((a) => a.items as Array<Record<string, unknown>>);
 
-    try {
-      // Execute in order: get → delete → create → update
-      if (gets.length > 0) {
-        const data = await executeGetBoardObjects(boardId);
-        results.push({ action: "get", ok: true, data });
-      }
+      const results: Array<{ action: string; ok?: boolean; id?: string; error?: string; data?: unknown }> = [];
 
-      if (deletes.length > 0) {
-        const ids = deletes.map((a) => a.id as string);
-        await executeBatchDelete(ids, boardId, channel);
-        for (const id of ids) {
-          results.push({ action: "delete", ok: true, id });
+      try {
+        // Execute in order: get → delete → create → update
+        if (gets.length > 0) {
+          const data = await executeGetBoardObjects(boardId);
+          results.push({ action: "get", ok: true, data });
         }
-      }
 
-      if (creates.length > 0) {
-        const createActions = creates.map((a) => ({
-          type: a.type as BoardObjectType,
-          x: a.x as number,
-          y: a.y as number,
-          text: a.text as string | undefined,
-          color: a.color as string | undefined,
-          width: a.width as number | undefined,
-          height: a.height as number | undefined,
-        }));
-        const { ids, objects } = await executeBatchCreate(createActions, boardId, userId, channel);
-        createdObjects.push(...objects);
-        for (const id of ids) {
-          results.push({ action: "create", ok: true, id });
+        if (deleteIds.length > 0) {
+          await executeBatchDelete(deleteIds, boardId, channel);
+          for (const id of deleteIds) {
+            results.push({ action: "delete", ok: true, id });
+          }
         }
+
+        if (createItems.length > 0) {
+          const { ids, objects } = await executeBatchCreate(createItems, boardId, userId, channel);
+          createdObjects.push(...objects);
+          for (const id of ids) {
+            results.push({ action: "create", ok: true, id });
+          }
+        }
+
+        if (updateItems.length > 0) {
+          await Promise.all(
+            updateItems.map(async (a) => {
+              try {
+                await executeUpdateObject(
+                  a as unknown as { id: string; color?: string; x?: number; y?: number; text?: string; width?: number; height?: number },
+                  boardId,
+                  channel
+                );
+                results.push({ action: "update", ok: true, id: a.id as string });
+              } catch (err) {
+                results.push({ action: "update", id: a.id as string, error: err instanceof Error ? err.message : "Unknown error" });
+              }
+            })
+          );
+        }
+      } catch (err) {
+        results.push({ action: "error", error: err instanceof Error ? err.message : "Unknown error" });
       }
 
-      if (updates.length > 0) {
-        await Promise.all(
-          updates.map(async (a) => {
-            try {
-              await executeUpdateObject(
-                a as unknown as { id: string; color?: string; x?: number; y?: number; text?: string; width?: number; height?: number },
-                boardId,
-                channel
-              );
-              results.push({ action: "update", ok: true, id: a.id as string });
-            } catch (err) {
-              results.push({ action: "update", id: a.id as string, error: err instanceof Error ? err.message : "Unknown error" });
-            }
-          })
-        );
-      }
-    } catch (err) {
-      results.push({ action: "error", error: err instanceof Error ? err.message : "Unknown error" });
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: JSON.stringify(results),
+      });
     }
-
-    messages.push({
-      role: "tool",
-      tool_call_id: toolCall.id,
-      content: JSON.stringify(results),
-    });
   }
 
   return {
