@@ -30,7 +30,9 @@ export async function broadcastBoardEvent(
   const channelName = nonce
     ? `board:${boardId}:${nonce}:objects`
     : `board:${boardId}:objects`;
-  const channel = supabase.channel(channelName);
+  const channel = supabase.channel(channelName, {
+    config: { private: true },
+  });
 
   return new Promise<void>((resolve) => {
     channel.subscribe((status) => {
@@ -78,7 +80,9 @@ export async function createPersistentChannel(boardId: string): Promise<Persiste
   const channelName = nonce
     ? `board:${boardId}:${nonce}:objects`
     : `board:${boardId}:objects`;
-  const channel = supabase.channel(channelName);
+  const channel = supabase.channel(channelName, {
+    config: { private: true },
+  });
 
   let subscribed = false;
   const pending: Array<{ event: string; payload: Record<string, unknown> }> = [];

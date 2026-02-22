@@ -1,5 +1,6 @@
 DROP POLICY IF EXISTS "board_realtime_select" ON "realtime"."messages";
 DROP POLICY IF EXISTS "board_realtime_insert" ON "realtime"."messages";
+DROP POLICY IF EXISTS "service_role_realtime_insert" ON "realtime"."messages";
 
 -- Board members (and all users on public boards) can receive broadcasts and presence
 CREATE POLICY "board_realtime_select"
@@ -46,3 +47,10 @@ WITH CHECK (
     )
   )
 );
+
+-- Allow service_role to broadcast (INSERT) on any channel
+CREATE POLICY "service_role_realtime_insert"
+ON "realtime"."messages"
+FOR INSERT
+TO service_role
+WITH CHECK (true);
