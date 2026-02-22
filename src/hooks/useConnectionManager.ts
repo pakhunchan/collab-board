@@ -51,5 +51,9 @@ export function useConnectionManager() {
     [send]
   );
 
-  return { status, reconnectKey, onChannelStatus };
+  const resetChannels = useCallback(() => {
+    send({ type: "RESET_CHANNELS" });
+  }, [send]);
+
+  return { status, reconnectKey, onChannelStatus, resetChannels };
 }

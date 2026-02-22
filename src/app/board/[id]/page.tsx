@@ -14,7 +14,7 @@ const Canvas = dynamic(() => import("@/components/board/Canvas"), {
 
 export default function BoardPage({ params }: { params: { id: string } }) {
   const { user } = useAuth();
-  const { status, reconnectKey, onChannelStatus } = useConnectionManager();
+  const { status, reconnectKey, onChannelStatus, resetChannels } = useConnectionManager();
   const [access, setAccess] = useState<"loading" | "granted" | "denied">(
     "loading"
   );
@@ -60,8 +60,9 @@ export default function BoardPage({ params }: { params: { id: string } }) {
   // Channel rotation: called when a different user is revoked —
   // we reconnect to the new channel nonce
   const onChannelRotated = useCallback((nonce: string) => {
+    resetChannels();
     setChannelNonce(nonce);
-  }, []);
+  }, [resetChannels]);
 
   // Forward member:joined events from the Realtime channel to SharePanel.
   // Uses a ref so the callback identity is stable (avoids channel reconnects).

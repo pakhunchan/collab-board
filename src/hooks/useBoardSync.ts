@@ -282,16 +282,12 @@ export function useBoardSync(
     );
 
     // Incoming: channel:rotated — server rotated the channel nonce
-    // Revoked user sees their uid and gets evicted; others reconnect on new nonce
+    // Only authorized users (still in board_members) receive this via RLS
     channel.on(
       "broadcast",
       { event: "channel:rotated" },
-      (payload: { payload: { channelNonce: string; revokedUserId: string } }) => {
-        if (payload.payload.revokedUserId === user.uid) {
-          onAccessRevoked?.();
-        } else {
-          onChannelRotated?.(payload.payload.channelNonce);
-        }
+      (payload: { payload: { channelNonce: string } }) => {
+        onChannelRotated?.(payload.payload.channelNonce);
       }
     );
 
@@ -380,7 +376,6 @@ export function useBoardSync(
     );
 
     // Subscribe AFTER registering listeners
-    const channelName = `board:${boardId}:${channelNonce}:objects`;
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
@@ -392,7 +387,7 @@ export function useBoardSync(
       ) {
         connectedRef.current = false;
       }
-      onChannelStatus?.(channelName, status);
+      onChannelStatus?.("objects", status);
     });
 
     return () => {

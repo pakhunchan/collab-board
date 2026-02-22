@@ -113,7 +113,6 @@ export function useCursors(
     });
 
     // 4. Subscribe AFTER listeners
-    const channelName = `board:${boardId}:${channelNonce}`;
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
@@ -125,7 +124,7 @@ export function useCursors(
       ) {
         connectedRef.current = false;
       }
-      onChannelStatus?.(channelName, status);
+      onChannelStatus?.("cursors", status);
     });
 
     return () => {

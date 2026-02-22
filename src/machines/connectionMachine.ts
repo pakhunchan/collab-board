@@ -10,7 +10,8 @@ export type ChannelStatus =
 type ConnectionEvent =
   | { type: "CHANNEL_STATUS"; channelId: string; status: ChannelStatus }
   | { type: "BROWSER_OFFLINE" }
-  | { type: "BROWSER_ONLINE" };
+  | { type: "BROWSER_ONLINE" }
+  | { type: "RESET_CHANNELS" };
 
 interface ConnectionContext {
   retryCount: number;
@@ -49,6 +50,7 @@ export const connectionMachine = setup({
       },
     }),
     resetRetryCount: assign({ retryCount: 0 }),
+    resetChannelStatuses: assign({ channelStatuses: {} }),
     setBrowserOnline: assign({ browserOnline: true }),
     setBrowserOffline: assign({ browserOnline: false }),
     incrementRetryCount: assign({
@@ -128,6 +130,10 @@ export const connectionMachine = setup({
           target: "reconnecting",
           actions: ["setBrowserOffline"],
         },
+        RESET_CHANNELS: {
+          target: "idle",
+          actions: ["resetChannelStatuses", "resetRetryCount"],
+        },
       },
     },
     reconnecting: {
@@ -171,6 +177,10 @@ export const connectionMachine = setup({
           target: "reconnecting",
           reenter: true,
           actions: ["setBrowserOnline", "resetRetryCount"],
+        },
+        RESET_CHANNELS: {
+          target: "idle",
+          actions: ["resetChannelStatuses", "resetRetryCount"],
         },
       },
     },
