@@ -159,7 +159,7 @@ export default function Canvas({
   } | null>(null);
 
   // Real-time cursors
-  const { remoteCursors, handleCursorMove } = useCursors(boardId, channelNonce, reconnectKey, onChannelStatus);
+  const { cursorMeta, cursorTargetsRef, handleCursorMove } = useCursors(boardId, channelNonce, reconnectKey, onChannelStatus);
 
   // Real-time object sync
   const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews, broadcastShapePreview, remoteShapePreviews } = useBoardSync(boardId, channelNonce, reconnectKey, onChannelStatus, onAccessRevoked, onChannelRotated, onMemberJoined);
@@ -1431,7 +1431,7 @@ export default function Canvas({
           })()}
         </Layer>
         <Layer listening={false}>
-          <Cursors remoteCursors={remoteCursors} scale={scale} />
+          <Cursors cursorMeta={cursorMeta} cursorTargetsRef={cursorTargetsRef} scale={scale} />
         </Layer>
       </Stage>
 

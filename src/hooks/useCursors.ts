@@ -7,12 +7,15 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { uidToColor } from "@/lib/presence-colors";
 import { usePresenceStore } from "@/stores/presenceStore";
 
-export interface CursorPosition {
+export interface CursorMeta {
   uid: string;
   name: string;
+  color: string;
+}
+
+export interface CursorTarget {
   x: number;
   y: number;
-  color: string;
   lastSeen: number;
 }
 
@@ -26,7 +29,8 @@ export function useCursors(
   onChannelStatus?: (channelId: string, status: string) => void
 ) {
   const { user } = useAuth();
-  const [remoteCursors, setRemoteCursors] = useState<Map<string, CursorPosition>>(new Map());
+  const [cursorMeta, setCursorMeta] = useState<Map<string, CursorMeta>>(new Map());
+  const cursorTargetsRef = useRef<Map<string, CursorTarget>>(new Map());
   const channelRef = useRef<RealtimeChannel | null>(null);
   const connectedRef = useRef(false);
 
@@ -43,6 +47,7 @@ export function useCursors(
       return;
     }
 
+    const targets = cursorTargetsRef.current;
     const supabase = getSupabaseBrowserClient();
     const myUid = user.uid;
     const myName = user.displayName || user.email || "Anonymous";
@@ -61,16 +66,14 @@ export function useCursors(
         const { uid, name, x, y } = payload.payload;
         if (uid === myUid) return;
 
-        setRemoteCursors((prev) => {
+        // Always update target ref (no re-render)
+        cursorTargetsRef.current.set(uid, { x, y, lastSeen: Date.now() });
+
+        // Only update state when a NEW cursor appears
+        setCursorMeta((prev) => {
+          if (prev.has(uid)) return prev; // same ref = no re-render
           const next = new Map(prev);
-          next.set(uid, {
-            uid,
-            name,
-            x,
-            y,
-            color: uidToColor(uid),
-            lastSeen: Date.now(),
-          });
+          next.set(uid, { uid, name, color: uidToColor(uid) });
           return next;
         });
       }
@@ -84,12 +87,13 @@ export function useCursors(
         const left = payload.leftPresences;
         if (!left?.length) return;
 
-        setRemoteCursors((prev) => {
+        setCursorMeta((prev) => {
           const next = new Map(prev);
           let changed = false;
           for (const p of left) {
             if (p.uid && next.has(p.uid)) {
               next.delete(p.uid);
+              cursorTargetsRef.current.delete(p.uid);
               changed = true;
             }
           }
@@ -133,7 +137,8 @@ export function useCursors(
       // Use unsubscribe (not removeChannel) to avoid killing the shared WebSocket
       // during React strict mode's unmount-remount cycle
       channel.unsubscribe();
-      setRemoteCursors(new Map());
+      setCursorMeta(new Map());
+      targets.clear();
       usePresenceStore.getState().setOnlineUsers([]);
     };
   }, [boardId, user, channelNonce, reconnectKey, onChannelStatus]);
@@ -141,16 +146,31 @@ export function useCursors(
   // Stale cursor cleanup every 3 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      setRemoteCursors((prev) => {
-        const now = Date.now();
-        let changed = false;
+      const now = Date.now();
+      const targets = cursorTargetsRef.current;
+      const staleUids: string[] = [];
+
+      targets.forEach((target, uid) => {
+        if (now - target.lastSeen > STALE_MS) {
+          staleUids.push(uid);
+        }
+      });
+
+      if (staleUids.length === 0) return;
+
+      for (const uid of staleUids) {
+        targets.delete(uid);
+      }
+
+      setCursorMeta((prev) => {
         const next = new Map(prev);
-        next.forEach((cursor, uid) => {
-          if (now - cursor.lastSeen > STALE_MS) {
+        let changed = false;
+        for (const uid of staleUids) {
+          if (next.has(uid)) {
             next.delete(uid);
             changed = true;
           }
-        });
+        }
         return changed ? next : prev;
       });
     }, STALE_MS);
@@ -223,5 +243,5 @@ export function useCursors(
     };
   }, []);
 
-  return { remoteCursors, handleCursorMove };
+  return { cursorMeta, cursorTargetsRef, handleCursorMove };
 }
