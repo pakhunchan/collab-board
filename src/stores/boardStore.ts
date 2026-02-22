@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { BoardObject, BoardObjectType } from "@/types/board";
 import { buildBoardObject } from "@/lib/board-object-defaults";
 
-export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text" | "connector" | "frame";
+export type Tool = "select" | "pan" | "sticky" | "rectangle" | "circle" | "line" | "text" | "frame";
 
 interface BoardStore {
   // Tool state

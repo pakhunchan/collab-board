@@ -930,29 +930,6 @@ export default function Canvas({
     [drawingLine, drawingShape, selectionBox, connectionDrag, hoverTargetId, hoverPort, stagePos, scale, broadcastCreate, broadcastUpdate, broadcastDrawPreview, broadcastShapePreview, broadcastConnectorPreview, setSelectedIds, setActiveTool, handleStickyDblClick]
   );
 
-  // Handle object click when connector tool is active
-  const handleConnectorClick = useCallback(
-    (objId: string): boolean => {
-      if (useBoardStore.getState().activeTool !== "connector") return false;
-      const obj = useBoardStore.getState().objects[objId];
-      if (!obj || obj.type === "connector") return false;
-
-      if (connectingFrom === null) {
-        setConnectingFrom(objId);
-        return true;
-      }
-      if (connectingFrom === objId) return true;
-
-      const c = broadcastCreate("connector", 0, 0);
-      broadcastUpdate(c.id, { properties: { fromId: connectingFrom, toId: objId } });
-      setConnectingFrom(null);
-      setConnectorPreview(null);
-      broadcastConnectorPreview(null);
-      setActiveTool("select");
-      return true;
-    },
-    [connectingFrom, broadcastCreate, broadcastUpdate, broadcastConnectorPreview, setActiveTool]
-  );
 
   // Click on stage: create objects or clear selection
   const handleStageClick = useCallback(
@@ -971,16 +948,6 @@ export default function Canvas({
 
       const tool = useBoardStore.getState().activeTool;
 
-      if (tool === "connector") {
-        // Click on empty canvas cancels connector creation
-        if (e.target === stage) {
-          setConnectingFrom(null);
-          setConnectorPreview(null);
-          broadcastConnectorPreview(null);
-        }
-        return;
-      }
-
       if (isShapeTool(tool)) {
         // Shape creation is handled in handleMouseUp
         return;
@@ -993,7 +960,7 @@ export default function Canvas({
         }
       }
     },
-    [broadcastConnectorPreview, clearSelection]
+    [clearSelection]
   );
 
   const handleTextareaBlur = useCallback(() => {
@@ -1094,7 +1061,7 @@ export default function Canvas({
   const cursorForTool = () => {
     if (isPanning) return "grab";
     if (connectionDrag) return "crosshair";
-    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text" || activeTool === "connector" || activeTool === "frame") return "crosshair";
+    if (activeTool === "sticky" || activeTool === "rectangle" || activeTool === "circle" || activeTool === "line" || activeTool === "text" || activeTool === "frame") return "crosshair";
     return "default";
   };
 
@@ -1136,7 +1103,6 @@ export default function Canvas({
         <Layer>
           {sortedObjects.map((obj) => {
             const onSelect = () => {
-              if (handleConnectorClick(obj.id)) return;
               if (shiftHeld.current) {
                 const current = useBoardStore.getState().selectedIds;
                 if (current.includes(obj.id)) {
@@ -1371,7 +1337,7 @@ export default function Canvas({
           )}
           <Transformer
             ref={transformerRef}
-            rotateEnabled={true}
+            rotateEnabled={selectedIds.length === 1 && objects[selectedIds[0]]?.type !== "frame"}
             boundBoxFunc={(_oldBox, newBox) => {
               if (newBox.width < 5 || newBox.height < 5) return _oldBox;
               if (!hasCircle) return newBox;
@@ -1486,28 +1452,6 @@ export default function Canvas({
         </Layer>
       </Stage>
 
-      {/* Connector hint */}
-      {activeTool === "connector" && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 16,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "6px 16px",
-            background: "rgba(0,0,0,0.75)",
-            color: "#fff",
-            borderRadius: 6,
-            fontSize: 13,
-            pointerEvents: "none",
-            zIndex: 10,
-          }}
-        >
-          {connectingFrom
-            ? "Click a second object to connect — Esc to cancel"
-            : "Click an object to start a connection"}
-        </div>
-      )}
 
       {/* Inline text editing overlay */}
       {editingId && (() => {

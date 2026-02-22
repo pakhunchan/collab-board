@@ -19,7 +19,6 @@ const tools: { id: Tool; label: string; icon: string }[] = [
   { id: "circle", label: "Circle", icon: "○" },
   { id: "line", label: "Line", icon: "╱" },
   { id: "text", label: "Text", icon: "T" },
-  { id: "connector", label: "Connector", icon: "→" },
   { id: "frame", label: "Frame", icon: "⬒" },
 ];
 
