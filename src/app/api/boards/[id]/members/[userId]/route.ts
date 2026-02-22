@@ -62,7 +62,6 @@ export async function DELETE(
   // so connected clients learn the new nonce (revoked user gets evicted)
   broadcastBoardEvent(params.id, "channel:rotated", {
     channelNonce: newNonce,
-    revokedUserId: params.userId,
   }, oldNonce);
 
   return NextResponse.json({ ok: true });

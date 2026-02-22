@@ -23,7 +23,7 @@ beforeEach(() => {
 describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () => {
   // --- Success path: broadcast IS called ---
 
-  it("broadcasts channel:rotated with new nonce and revoked userId on success", async () => {
+  it("broadcasts channel:rotated with new nonce on success", async () => {
     mockSupabase.addChain({
       data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
@@ -41,37 +41,16 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
       BOARD_ID,
       "channel:rotated",
       expect.objectContaining({
-        revokedUserId: EDITOR_UID,
         channelNonce: expect.any(String),
       }),
       OLD_NONCE
     );
+    // revokedUserId should NOT be in the payload (security enforced by RLS, not client)
+    const payload = vi.mocked(broadcastBoardEvent).mock.calls[0][2];
+    expect(payload).not.toHaveProperty("revokedUserId");
   });
 
-  it("broadcasts with the correct userId when removing different users", async () => {
-    const otherUser = "viewer-uid-789";
-    mockSupabase.addChain({
-      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
-      error: null,
-    });
-    mockSupabase.addChain({ data: null, error: null });
-    mockSupabase.addChain({ data: null, error: null });
-
-    await DELETE(makeRequest("DELETE"), {
-      params: { id: BOARD_ID, userId: otherUser },
-    });
-
-    expect(broadcastBoardEvent).toHaveBeenCalledWith(
-      BOARD_ID,
-      "channel:rotated",
-      expect.objectContaining({
-        revokedUserId: otherUser,
-      }),
-      OLD_NONCE
-    );
-  });
-
-  it("broadcasts with the correct boardId", async () => {
+  it("broadcasts with the correct boardId and old nonce", async () => {
     const differentBoard = "board-uuid-99";
     mockSupabase.addChain({
       data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
@@ -88,7 +67,7 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
       differentBoard,
       "channel:rotated",
       expect.objectContaining({
-        revokedUserId: EDITOR_UID,
+        channelNonce: expect.any(String),
       }),
       OLD_NONCE
     );
