@@ -11,6 +11,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { auth } from "./firebase";
+import { resetSupabaseBrowserClient } from "./supabase/client";
 
 interface AuthContextType {
   user: User | null;
@@ -42,7 +43,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(auth, email, password);
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    // Wait for processSignUp Cloud Function to set custom claims, then refresh token
+    await new Promise((r) => setTimeout(r, 2000));
+    await cred.user.getIdToken(true);
   };
 
   const signInWithGoogle = async () => {
@@ -51,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     await firebaseSignOut(auth);
+    resetSupabaseBrowserClient();
   };
 
   return (
