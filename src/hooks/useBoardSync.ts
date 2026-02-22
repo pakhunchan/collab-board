@@ -291,6 +291,17 @@ export function useBoardSync(
       }
     );
 
+    // Incoming: access:revoked — server evicts a specific user
+    channel.on(
+      "broadcast",
+      { event: "access:revoked" },
+      (payload: { payload: { userId: string } }) => {
+        if (payload.payload.userId === user.uid) {
+          onAccessRevoked?.();
+        }
+      }
+    );
+
     // Incoming: board:deleted — board was deleted, evict everyone
     channel.on(
       "broadcast",

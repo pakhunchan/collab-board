@@ -58,6 +58,11 @@ export async function DELETE(
     .update({ channel_nonce: newNonce })
     .eq("id", params.id);
 
+  // Fire-and-forget: tell the revoked user why they're being disconnected
+  broadcastBoardEvent(params.id, "access:revoked", {
+    userId: params.userId,
+  }, oldNonce);
+
   // Fire-and-forget: broadcast channel:rotated on the OLD channel
   // so connected clients learn the new nonce (revoked user gets evicted)
   broadcastBoardEvent(params.id, "channel:rotated", {
