@@ -4,14 +4,32 @@ import { getSupabaseServerClient } from "./server";
  * Broadcast an event on a board's Realtime channel from the server.
  * Uses the service-role client so it can broadcast to any channel.
  * Callers should fire-and-forget (don't await in the API response path).
+ *
+ * When `channelNonce` is provided, it is used directly (e.g. for broadcasting
+ * on the OLD channel during nonce rotation). Otherwise, the nonce is fetched
+ * from the `boards` table.
  */
 export async function broadcastBoardEvent(
   boardId: string,
   event: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  channelNonce?: string
 ) {
   const supabase = getSupabaseServerClient();
-  const channelName = `board:${boardId}:objects`;
+
+  let nonce = channelNonce;
+  if (!nonce) {
+    const { data } = await supabase
+      .from("boards")
+      .select("channel_nonce")
+      .eq("id", boardId)
+      .single();
+    nonce = data?.channel_nonce;
+  }
+
+  const channelName = nonce
+    ? `board:${boardId}:${nonce}:objects`
+    : `board:${boardId}:objects`;
   const channel = supabase.channel(channelName);
 
   return new Promise<void>((resolve) => {
@@ -44,10 +62,22 @@ export interface PersistentChannel {
  * Create a persistent broadcast channel that subscribes once.
  * Messages are queued until the channel is subscribed, then flushed.
  * Call `close()` when done to tear down the channel.
+ *
+ * Fetches the channel nonce from the database to construct the channel name.
  */
-export function createPersistentChannel(boardId: string): PersistentChannel {
+export async function createPersistentChannel(boardId: string): Promise<PersistentChannel> {
   const supabase = getSupabaseServerClient();
-  const channelName = `board:${boardId}:objects`;
+
+  const { data } = await supabase
+    .from("boards")
+    .select("channel_nonce")
+    .eq("id", boardId)
+    .single();
+  const nonce = data?.channel_nonce;
+
+  const channelName = nonce
+    ? `board:${boardId}:${nonce}:objects`
+    : `board:${boardId}:objects`;
   const channel = supabase.channel(channelName);
 
   let subscribed = false;

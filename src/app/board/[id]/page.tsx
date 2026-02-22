@@ -18,6 +18,7 @@ export default function BoardPage({ params }: { params: { id: string } }) {
   const [access, setAccess] = useState<"loading" | "granted" | "denied">(
     "loading"
   );
+  const [channelNonce, setChannelNonce] = useState<string | null>(null);
 
   // Initial one-time access check (prevents unauthorized mount)
   useEffect(() => {
@@ -31,7 +32,15 @@ export default function BoardPage({ params }: { params: { id: string } }) {
         const res = await fetch(`/api/boards/${params.id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!cancelled) setAccess(res.ok ? "granted" : "denied");
+        if (!cancelled) {
+          if (res.ok) {
+            const board = await res.json();
+            setChannelNonce(board.channel_nonce);
+            setAccess("granted");
+          } else {
+            setAccess("denied");
+          }
+        }
       } catch {
         if (!cancelled) setAccess("denied");
       }
@@ -43,9 +52,15 @@ export default function BoardPage({ params }: { params: { id: string } }) {
   }, [user, params.id]);
 
   // Server-driven revocation: called when the Realtime channel receives
-  // an access:revoked or board:deleted event
+  // a channel:rotated (for the revoked user) or board:deleted event
   const onAccessRevoked = useCallback(() => {
     setAccess("denied");
+  }, []);
+
+  // Channel rotation: called when a different user is revoked —
+  // we reconnect to the new channel nonce
+  const onChannelRotated = useCallback((nonce: string) => {
+    setChannelNonce(nonce);
   }, []);
 
   // Forward member:joined events from the Realtime channel to SharePanel.
@@ -85,13 +100,17 @@ export default function BoardPage({ params }: { params: { id: string } }) {
     <div className="h-screen flex flex-col overflow-hidden">
       <Toolbar boardId={params.id} connectionStatus={status} memberJoinedRef={memberJoinedRef} />
       <div className="flex-1 relative">
-        <Canvas
-          boardId={params.id}
-          reconnectKey={reconnectKey}
-          onChannelStatus={onChannelStatus}
-          onAccessRevoked={onAccessRevoked}
-          onMemberJoined={onMemberJoined}
-        />
+        {channelNonce && (
+          <Canvas
+            boardId={params.id}
+            channelNonce={channelNonce}
+            reconnectKey={reconnectKey}
+            onChannelStatus={onChannelStatus}
+            onAccessRevoked={onAccessRevoked}
+            onChannelRotated={onChannelRotated}
+            onMemberJoined={onMemberJoined}
+          />
+        )}
         <AiPrompt boardId={params.id} />
       </div>
     </div>

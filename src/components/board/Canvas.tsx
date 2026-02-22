@@ -117,17 +117,21 @@ function DotGrid({
 
 interface CanvasProps {
   boardId: string;
+  channelNonce: string;
   reconnectKey?: number;
   onChannelStatus?: (channelId: string, status: string) => void;
   onAccessRevoked?: () => void;
+  onChannelRotated?: (nonce: string) => void;
   onMemberJoined?: (member: { user_id: string; display_name: string | null; role: string; joined_at: string }) => void;
 }
 
 export default function Canvas({
   boardId,
+  channelNonce,
   reconnectKey = 0,
   onChannelStatus,
   onAccessRevoked,
+  onChannelRotated,
   onMemberJoined,
 }: CanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
@@ -167,10 +171,10 @@ export default function Canvas({
   } | null>(null);
 
   // Real-time cursors
-  const { remoteCursors, handleCursorMove } = useCursors(boardId, reconnectKey, onChannelStatus);
+  const { remoteCursors, handleCursorMove } = useCursors(boardId, channelNonce, reconnectKey, onChannelStatus);
 
   // Real-time object sync
-  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews, broadcastShapePreview, remoteShapePreviews } = useBoardSync(boardId, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined);
+  const { broadcastCreate, broadcastUpdate, broadcastDelete, broadcastLiveMove, broadcastDrawPreview, remoteDrawPreviews, broadcastConnectorPreview, remoteConnectorPreviews, broadcastShapePreview, remoteShapePreviews } = useBoardSync(boardId, channelNonce, reconnectKey, onChannelStatus, onAccessRevoked, onChannelRotated, onMemberJoined);
 
   // Inline text editing state
   const [editingId, setEditingId] = useState<string | null>(null);

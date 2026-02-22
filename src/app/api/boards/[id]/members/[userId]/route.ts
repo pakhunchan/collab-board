@@ -19,7 +19,7 @@ export async function DELETE(
   // Only board owner can remove members
   const { data: board } = await supabase
     .from("boards")
-    .select("created_by")
+    .select("created_by, channel_nonce")
     .eq("id", params.id)
     .single();
 
@@ -49,8 +49,21 @@ export async function DELETE(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Fire-and-forget: notify the removed user's client immediately
-  broadcastBoardEvent(params.id, "access:revoked", { userId: params.userId });
+  // Rotate channel nonce: generate new UUID, update board
+  const oldNonce = board.channel_nonce;
+  const newNonce = crypto.randomUUID();
+
+  await supabase
+    .from("boards")
+    .update({ channel_nonce: newNonce })
+    .eq("id", params.id);
+
+  // Fire-and-forget: broadcast channel:rotated on the OLD channel
+  // so connected clients learn the new nonce (revoked user gets evicted)
+  broadcastBoardEvent(params.id, "channel:rotated", {
+    channelNonce: newNonce,
+    revokedUserId: params.userId,
+  }, oldNonce);
 
   return NextResponse.json({ ok: true });
 }

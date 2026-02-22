@@ -21,6 +21,7 @@ const STALE_MS = 3000;
 
 export function useCursors(
   boardId: string | undefined,
+  channelNonce: string | undefined,
   reconnectKey = 0,
   onChannelStatus?: (channelId: string, status: string) => void
 ) {
@@ -36,7 +37,7 @@ export function useCursors(
 
   // Single atomic effect: create channel, register listeners, subscribe, cleanup
   useEffect(() => {
-    if (!boardId || !user) {
+    if (!boardId || !user || !channelNonce) {
       channelRef.current = null;
       connectedRef.current = false;
       return;
@@ -46,9 +47,8 @@ export function useCursors(
     const myUid = user.uid;
     const myName = user.displayName || user.email || "Anonymous";
 
-
-    const channel = supabase.channel(`board:${boardId}`, {
-      config: { broadcast: { self: false } },
+    const channel = supabase.channel(`board:${boardId}:${channelNonce}`, {
+      config: { private: true, broadcast: { self: false } },
     });
 
     channelRef.current = channel;
@@ -113,7 +113,7 @@ export function useCursors(
     });
 
     // 4. Subscribe AFTER listeners
-    const channelName = `board:${boardId}`;
+    const channelName = `board:${boardId}:${channelNonce}`;
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
@@ -137,7 +137,7 @@ export function useCursors(
       setRemoteCursors(new Map());
       usePresenceStore.getState().setOnlineUsers([]);
     };
-  }, [boardId, user, reconnectKey, onChannelStatus]);
+  }, [boardId, user, channelNonce, reconnectKey, onChannelStatus]);
 
   // Stale cursor cleanup every 3 seconds
   useEffect(() => {

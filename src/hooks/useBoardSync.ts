@@ -23,9 +23,11 @@ async function getAuthHeaders(user: User) {
 
 export function useBoardSync(
   boardId: string | undefined,
+  channelNonce: string | undefined,
   reconnectKey = 0,
   onChannelStatus?: (channelId: string, status: string) => void,
   onAccessRevoked?: () => void,
+  onChannelRotated?: (nonce: string) => void,
   onMemberJoined?: (member: { user_id: string; display_name: string | null; role: string; joined_at: string }) => void
 ) {
   const { user } = useAuth();
@@ -222,7 +224,7 @@ export function useBoardSync(
 
   // Channel lifecycle
   useEffect(() => {
-    if (!boardId || !user) {
+    if (!boardId || !user || !channelNonce) {
       channelRef.current = null;
       connectedRef.current = false;
       return;
@@ -230,8 +232,8 @@ export function useBoardSync(
 
     const supabase = getSupabaseBrowserClient();
 
-    const channel = supabase.channel(`board:${boardId}:objects`, {
-      config: { broadcast: { self: false } },
+    const channel = supabase.channel(`board:${boardId}:${channelNonce}:objects`, {
+      config: { private: true, broadcast: { self: false } },
     });
 
     channelRef.current = channel;
@@ -279,13 +281,16 @@ export function useBoardSync(
       }
     );
 
-    // Incoming: access:revoked — server evicts a specific user
+    // Incoming: channel:rotated — server rotated the channel nonce
+    // Revoked user sees their uid and gets evicted; others reconnect on new nonce
     channel.on(
       "broadcast",
-      { event: "access:revoked" },
-      (payload: { payload: { userId: string } }) => {
-        if (payload.payload.userId === user.uid) {
+      { event: "channel:rotated" },
+      (payload: { payload: { channelNonce: string; revokedUserId: string } }) => {
+        if (payload.payload.revokedUserId === user.uid) {
           onAccessRevoked?.();
+        } else {
+          onChannelRotated?.(payload.payload.channelNonce);
         }
       }
     );
@@ -375,7 +380,7 @@ export function useBoardSync(
     );
 
     // Subscribe AFTER registering listeners
-    const channelName = `board:${boardId}:objects`;
+    const channelName = `board:${boardId}:${channelNonce}:objects`;
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         connectedRef.current = true;
@@ -395,7 +400,7 @@ export function useBoardSync(
       channelRef.current = null;
       channel.unsubscribe();
     };
-  }, [boardId, user, reconnectKey, onChannelStatus, onAccessRevoked, onMemberJoined, drainPendingBroadcasts]);
+  }, [boardId, user, channelNonce, reconnectKey, onChannelStatus, onAccessRevoked, onChannelRotated, onMemberJoined, drainPendingBroadcasts]);
 
   // Cleanup debounce timers on unmount
   useEffect(() => {

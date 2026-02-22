@@ -12,6 +12,7 @@ import { broadcastBoardEvent } from "@/lib/supabase/broadcast";
 const BOARD_ID = "board-uuid-1";
 const OWNER_UID = "owner-uid-123";
 const EDITOR_UID = "editor-uid-456";
+const OLD_NONCE = "old-nonce-uuid";
 
 beforeEach(() => {
   mockSupabase.reset();
@@ -22,12 +23,13 @@ beforeEach(() => {
 describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () => {
   // --- Success path: broadcast IS called ---
 
-  it("broadcasts access:revoked with the removed user's ID on success", async () => {
+  it("broadcasts channel:rotated with new nonce and revoked userId on success", async () => {
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     }); // select board
     mockSupabase.addChain({ data: null, error: null }); // delete member
+    mockSupabase.addChain({ data: null, error: null }); // update channel_nonce
 
     const res = await DELETE(makeRequest("DELETE"), {
       params: { id: BOARD_ID, userId: EDITOR_UID },
@@ -37,17 +39,22 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
     expect(broadcastBoardEvent).toHaveBeenCalledTimes(1);
     expect(broadcastBoardEvent).toHaveBeenCalledWith(
       BOARD_ID,
-      "access:revoked",
-      { userId: EDITOR_UID }
+      "channel:rotated",
+      expect.objectContaining({
+        revokedUserId: EDITOR_UID,
+        channelNonce: expect.any(String),
+      }),
+      OLD_NONCE
     );
   });
 
   it("broadcasts with the correct userId when removing different users", async () => {
     const otherUser = "viewer-uid-789";
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     });
+    mockSupabase.addChain({ data: null, error: null });
     mockSupabase.addChain({ data: null, error: null });
 
     await DELETE(makeRequest("DELETE"), {
@@ -56,17 +63,21 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
 
     expect(broadcastBoardEvent).toHaveBeenCalledWith(
       BOARD_ID,
-      "access:revoked",
-      { userId: otherUser }
+      "channel:rotated",
+      expect.objectContaining({
+        revokedUserId: otherUser,
+      }),
+      OLD_NONCE
     );
   });
 
   it("broadcasts with the correct boardId", async () => {
     const differentBoard = "board-uuid-99";
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     });
+    mockSupabase.addChain({ data: null, error: null });
     mockSupabase.addChain({ data: null, error: null });
 
     await DELETE(makeRequest("DELETE"), {
@@ -75,9 +86,30 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
 
     expect(broadcastBoardEvent).toHaveBeenCalledWith(
       differentBoard,
-      "access:revoked",
-      { userId: EDITOR_UID }
+      "channel:rotated",
+      expect.objectContaining({
+        revokedUserId: EDITOR_UID,
+      }),
+      OLD_NONCE
     );
+  });
+
+  it("provides a new nonce that differs from the old one", async () => {
+    mockSupabase.addChain({
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
+      error: null,
+    });
+    mockSupabase.addChain({ data: null, error: null });
+    mockSupabase.addChain({ data: null, error: null });
+
+    await DELETE(makeRequest("DELETE"), {
+      params: { id: BOARD_ID, userId: EDITOR_UID },
+    });
+
+    const call = vi.mocked(broadcastBoardEvent).mock.calls[0];
+    const payload = call[2] as { channelNonce: string };
+    expect(payload.channelNonce).not.toBe(OLD_NONCE);
+    expect(payload.channelNonce).toBeTruthy();
   });
 
   // --- Failure paths: broadcast is NOT called ---
@@ -103,7 +135,7 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
   it("does NOT broadcast when user is not the owner (403)", async () => {
     setMockUser({ uid: "non-owner" });
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     });
     await DELETE(makeRequest("DELETE"), {
@@ -115,7 +147,7 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
 
   it("does NOT broadcast when trying to remove the owner (400)", async () => {
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     });
     await DELETE(makeRequest("DELETE"), {
@@ -127,7 +159,7 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
 
   it("does NOT broadcast when DB delete fails (500)", async () => {
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     });
     mockSupabase.addChain({
@@ -149,9 +181,10 @@ describe("DELETE /api/boards/[id]/members/[userId] — broadcast behavior", () =
     vi.mocked(broadcastBoardEvent).mockReturnValue(new Promise(() => {}));
 
     mockSupabase.addChain({
-      data: { created_by: OWNER_UID },
+      data: { created_by: OWNER_UID, channel_nonce: OLD_NONCE },
       error: null,
     });
+    mockSupabase.addChain({ data: null, error: null });
     mockSupabase.addChain({ data: null, error: null });
 
     const res = await DELETE(makeRequest("DELETE"), {

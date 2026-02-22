@@ -51,7 +51,7 @@ export async function DELETE(
   // Only the board creator can delete it
   const { data: board, error: fetchError } = await supabase
     .from("boards")
-    .select("created_by")
+    .select("created_by, channel_nonce")
     .eq("id", params.id)
     .single();
 
@@ -64,7 +64,7 @@ export async function DELETE(
   }
 
   // Broadcast before deleting so channel still exists for connected users
-  broadcastBoardEvent(params.id, "board:deleted", {});
+  broadcastBoardEvent(params.id, "board:deleted", {}, board.channel_nonce);
 
   const { error } = await supabase
     .from("boards")

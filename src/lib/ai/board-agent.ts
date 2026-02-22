@@ -373,7 +373,7 @@ export const runBoardAgent = traceable(
   ];
 
   const createdObjects: BoardObject[] = [];
-  const channel = createPersistentChannel(boardId);
+  const channel = await createPersistentChannel(boardId);
 
   try {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
