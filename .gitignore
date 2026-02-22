@@ -37,6 +37,10 @@ potential_features.md
 # examples
 /examples
 
+# mcp
+.mcp.json
+.cab/
+
 # vercel
 .vercel
 
