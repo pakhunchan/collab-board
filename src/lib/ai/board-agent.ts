@@ -22,7 +22,7 @@ function buildSystemPrompt(viewport?: { centerX: number; centerY: number; width:
       }
     : { minX: 100, maxX: 700, minY: 100, maxY: 500 };
 
-  return `You manage objects on a collaborative whiteboard. Always use tools to place content on the board — never respond with plain text answers. Execute requests immediately using tool defaults — never ask clarifying questions.
+  return `Quickly. Review the user's request and generate the tool calling instructions as a JSON response.
 
 x and y are TOP-LEFT corner coordinates. Default sizes (width x height):
 sticky: 200x200, rectangle: 240x160, circle: 160x160, text: 200x40, frame: 400x300
@@ -37,12 +37,14 @@ When placing multiple objects, ensure at least 20px gap between all edges. An ob
 Arrange multiple shapes towards the center, in a grid, with spacing. Do NOT create objects that touch or overlap with other objects.`;
 }
 
+const SUMMARY_SYSTEM_PROMPT = "Briefly describe what you did on the whiteboard. One short sentence.";
+
 const tools: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
       name: "apply_board_actions",
-      description: "Apply one or more actions to the board. Batch multiple actions into a single call.",
+      description: "Apply actions to the board. Use ONE batch_create with ALL items in its array (not separate actions per item).",
       parameters: {
         type: "object",
         properties: {
@@ -68,6 +70,7 @@ const tools: ChatCompletionTool[] = [
                       width: { type: "number", description: "Width" },
                       height: { type: "number", description: "Height" },
                     },
+                    required: ["type", "x", "y"],
                   },
                 },
               },
@@ -374,11 +377,15 @@ export const runBoardAgent = traceable(
 
   try {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    if (turn > 0) {
+      messages[0] = { role: "system", content: SUMMARY_SYSTEM_PROMPT };
+    }
+
     const response = await openai.chat.completions.create({
       model: "gpt-4.1-nano",
       messages,
-      tools,
-      tool_choice: turn === 0 ? "required" : "auto",
+      tools: turn === 0 ? tools : undefined,
+      tool_choice: turn === 0 ? "required" : undefined,
     });
 
     const choice = response.choices[0];
