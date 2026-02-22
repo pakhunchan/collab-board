@@ -19,7 +19,7 @@ export interface CursorTarget {
   lastSeen: number;
 }
 
-const THROTTLE_MS = 50;
+const THROTTLE_MS = 30;
 const STALE_MS = 3000;
 
 export function useCursors(

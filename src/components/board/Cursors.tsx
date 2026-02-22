@@ -9,7 +9,7 @@ import { CursorMeta, CursorTarget } from "@/hooks/useCursors";
 const CURSOR_PATH =
   "M0,0 L0,14 L4,10 L7.5,16 L9.5,15 L6,9 L11,9 Z";
 
-const LERP_FACTOR = 0.15;
+const LERP_SPEED = 10;
 const SNAP_THRESHOLD = 0.5;
 
 interface CursorsProps {
@@ -27,6 +27,8 @@ export default function Cursors({ cursorMeta, cursorTargetsRef, scale }: Cursors
   const currentPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   // rAF handle
   const animFrameRef = useRef<number | null>(null);
+  // Last frame timestamp for delta-time lerp
+  const lastFrameRef = useRef(performance.now());
 
   // Callback ref factory: registers/unregisters Konva nodes
   const getCallbackRef = useCallback(
@@ -51,6 +53,11 @@ export default function Cursors({ cursorMeta, cursorTargetsRef, scale }: Cursors
   // rAF lerp loop
   useEffect(() => {
     const tick = () => {
+      const now = performance.now();
+      const dt = (now - lastFrameRef.current) / 1000;
+      lastFrameRef.current = now;
+      const factor = 1 - Math.exp(-LERP_SPEED * dt);
+
       const targets = cursorTargetsRef.current;
       let anyMoved = false;
       let layer: Konva.Layer | undefined;
@@ -87,8 +94,8 @@ export default function Cursors({ cursorMeta, cursorTargetsRef, scale }: Cursors
           return;
         }
 
-        pos.x += dx * LERP_FACTOR;
-        pos.y += dy * LERP_FACTOR;
+        pos.x += dx * factor;
+        pos.y += dy * factor;
         node.x(pos.x);
         node.y(pos.y);
         anyMoved = true;

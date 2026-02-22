@@ -195,6 +195,8 @@ export default function Canvas({
   broadcastLiveMoveRef.current = broadcastLiveMove;
   const broadcastUpdateRef = useRef(broadcastUpdate);
   broadcastUpdateRef.current = broadcastUpdate;
+  const handleCursorMoveRef = useRef(handleCursorMove);
+  handleCursorMoveRef.current = handleCursorMove;
 
   // Native Konva dragmove + dragend listeners for live position sync and frame containment
   useEffect(() => {
@@ -252,6 +254,17 @@ export default function Canvas({
             broadcastLiveMoveRef.current(childId, { x: newX, y: newY });
           }
         }
+      }
+
+      // Broadcast cursor position during drag (onMouseMove doesn't fire)
+      const pointer = stage.getPointerPosition();
+      if (pointer) {
+        const pos = stage.position();
+        const s = stage.scaleX();
+        handleCursorMoveRef.current(
+          (pointer.x - pos.x) / s,
+          (pointer.y - pos.y) / s
+        );
       }
 
       // Force canvas redraw so connectors pick up new positions during drag
