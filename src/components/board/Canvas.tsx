@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Circle, Arrow, Line as KonvaLine, Rect as KonvaRect, Ellipse, Transformer } from "react-konva";
+import { Stage, Layer, Arrow, Line as KonvaLine, Rect as KonvaRect, Ellipse, Transformer } from "react-konva";
 import Konva from "konva";
 import { useBoardStore } from "@/stores/boardStore";
 import { useCursors } from "@/hooks/useCursors";
@@ -69,49 +69,37 @@ const DOT_SPACING = 40;
 const DOT_RADIUS = 1.5;
 const DOT_COLOR = "#d0d0d0";
 
-function DotGrid({
-  stagePos,
-  scale,
-  width,
-  height,
-}: {
-  stagePos: { x: number; y: number };
-  scale: number;
-  width: number;
-  height: number;
-}) {
-  const dots: { x: number; y: number }[] = [];
+function DotGridPattern() {
+  const [patternImage, setPatternImage] = useState<HTMLImageElement | null>(null);
+  const size = 20000;
 
-  const spacing = DOT_SPACING;
+  useEffect(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = DOT_SPACING;
+    canvas.height = DOT_SPACING;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = DOT_COLOR;
+    ctx.beginPath();
+    ctx.arc(DOT_SPACING / 2, DOT_SPACING / 2, DOT_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    const img = new Image();
+    img.onload = () => setPatternImage(img);
+    img.src = canvas.toDataURL();
+  }, []);
 
-  const startX = -stagePos.x / scale;
-  const startY = -stagePos.y / scale;
-  const endX = startX + width / scale;
-  const endY = startY + height / scale;
-
-  const gridStartX = Math.floor(startX / spacing) * spacing;
-  const gridStartY = Math.floor(startY / spacing) * spacing;
-
-  for (let x = gridStartX; x <= endX; x += spacing) {
-    for (let y = gridStartY; y <= endY; y += spacing) {
-      dots.push({ x, y });
-    }
-  }
+  if (!patternImage) return null;
 
   return (
-    <>
-      {dots.map((dot, i) => (
-        <Circle
-          key={i}
-          x={dot.x}
-          y={dot.y}
-          radius={DOT_RADIUS / scale}
-          fill={DOT_COLOR}
-          listening={false}
-          perfectDrawEnabled={false}
-        />
-      ))}
-    </>
+    <KonvaRect
+      x={-size / 2}
+      y={-size / 2}
+      width={size}
+      height={size}
+      fillPatternImage={patternImage}
+      fillPatternRepeat="repeat"
+      listening={false}
+      perfectDrawEnabled={false}
+    />
   );
 }
 
@@ -1093,12 +1081,7 @@ export default function Canvas({
         onMouseMove={handleMouseMove}
       >
         <Layer listening={false}>
-          <DotGrid
-            stagePos={stagePos}
-            scale={scale}
-            width={dimensions.width}
-            height={dimensions.height}
-          />
+          <DotGridPattern />
         </Layer>
         <Layer>
           {sortedObjects.map((obj) => {
