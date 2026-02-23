@@ -1599,7 +1599,7 @@ export default function Canvas({
       })()}
 
       {/* Color picker for selected objects */}
-      {selectedIds.length > 0 && !editingId && (
+      {selectedIds.length > 0 && (
         <ColorPicker
           currentColor={objects[selectedIds[0]]?.color}
           onChange={(color) => {

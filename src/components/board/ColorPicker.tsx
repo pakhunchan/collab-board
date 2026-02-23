@@ -21,12 +21,13 @@ export default function ColorPicker({ currentColor, onChange }: ColorPickerProps
     <div
       style={{
         position: "absolute",
-        bottom: 16,
-        left: "50%",
-        transform: "translateX(-50%)",
+        left: 16,
+        top: "50%",
+        transform: "translateY(-50%)",
         display: "flex",
+        flexDirection: "column",
         gap: 6,
-        padding: "6px 10px",
+        padding: "10px 6px",
         background: "rgba(255,255,255,0.95)",
         borderRadius: 8,
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
