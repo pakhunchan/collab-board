@@ -31,8 +31,7 @@ yarn-error.log*
 .env*.local
 
 # notes
-lessons-learned.md
-potential_features.md
+/misc
 
 # examples
 /examples
