@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useBoardStore } from "@/stores/boardStore";
 
@@ -13,6 +13,14 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isError = response?.startsWith("Error") ?? false;
+
+  // Auto-dismiss success responses after 4 seconds
+  useEffect(() => {
+    if (!response || isError) return;
+    const timer = setTimeout(() => setResponse(null), 4000);
+    return () => clearTimeout(timer);
+  }, [response, isError]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -43,7 +51,6 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
           const createdIds = (data.createdObjects ?? []).map((o: { id: string }) => o.id);
           const updatedIds = data.updatedObjectIds ?? [];
           const allIds = [...createdIds, ...updatedIds];
-          console.log("[AiPrompt] createdIds:", createdIds, "updatedIds:", updatedIds, "allIds:", allIds);
           if (allIds.length > 0) {
             requestFitToObjects(allIds);
           }
@@ -76,15 +83,26 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
   return (
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4">
       <div className="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden">
-        {response && (
+        {loading && (
+          <div className="px-4 py-3 text-sm text-purple-600 border-b bg-purple-50 flex items-center gap-2">
+            <span className="inline-block w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
+            Thinking...
+          </div>
+        )}
+        {!loading && response && (
           <div
-            className={`px-4 py-2 text-sm border-b ${
-              response.startsWith("Error")
-                ? "bg-red-50 text-red-700"
-                : "bg-green-50 text-green-700"
+            className={`px-4 py-3 text-sm border-b flex items-start gap-2 ${
+              isError ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
             }`}
           >
-            {response}
+            <span className="mt-0.5 shrink-0">{isError ? "✕" : "✓"}</span>
+            <span className="flex-1">{response}</span>
+            <button
+              onClick={() => setResponse(null)}
+              className="shrink-0 text-current opacity-50 hover:opacity-100"
+            >
+              ✕
+            </button>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex items-center gap-2 p-2">
