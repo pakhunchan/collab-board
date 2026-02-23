@@ -190,6 +190,115 @@ export default function Canvas({
     });
   }, [stagePos, scale, dimensions, setViewport]);
 
+  // Animate viewport to fit objects after AI tool calls.
+  // Uses imperative Zustand subscribe (not a React selector) so that clearing
+  // the signal doesn't trigger a re-render/effect-cleanup cycle that kills the animation.
+  const fitAnimationRef = useRef<number | null>(null);
+  useEffect(() => {
+    const unsub = useBoardStore.subscribe((state, prev) => {
+      if (!state.fitToObjectIds || state.fitToObjectIds === prev.fitToObjectIds) return;
+
+      const ids = state.fitToObjectIds;
+      console.log("[Canvas] fitToObjectIds fired:", ids);
+      useBoardStore.getState().clearFitToObjects();
+
+      const objs = state.objects;
+
+      // Collect valid objects (skip missing/deleted and connectors)
+      const targets = ids
+        .map((id) => objs[id])
+        .filter((o) => o && o.type !== "connector");
+
+      console.log("[Canvas] targets found:", targets.length, targets.map(o => ({ id: o.id, x: o.x, y: o.y, w: o.width, h: o.height })));
+      if (targets.length === 0) return;
+
+      // Cancel any in-flight animation
+      if (fitAnimationRef.current !== null) {
+        cancelAnimationFrame(fitAnimationRef.current);
+        fitAnimationRef.current = null;
+      }
+
+      // Calculate bounding box (handle negative width/height for lines)
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const o of targets) {
+        const x1 = Math.min(o.x, o.x + o.width);
+        const x2 = Math.max(o.x, o.x + o.width);
+        const y1 = Math.min(o.y, o.y + o.height);
+        const y2 = Math.max(o.y, o.y + o.height);
+        if (x1 < minX) minX = x1;
+        if (y1 < minY) minY = y1;
+        if (x2 > maxX) maxX = x2;
+        if (y2 > maxY) maxY = y2;
+      }
+
+      const boxW = maxX - minX;
+      const boxH = maxY - minY;
+
+      // Add padding: 10% per side, minimum 50px
+      const padX = Math.max(50, boxW * 0.1);
+      const padY = Math.max(50, boxH * 0.1);
+      const paddedW = boxW + padX * 2;
+      const paddedH = boxH + padY * 2;
+      const boxCenterX = minX - padX + paddedW / 2;
+      const boxCenterY = minY - padY + paddedH / 2;
+
+      // Compute target scale and position
+      const container = stageRef.current?.container()?.parentElement;
+      const curW = container?.clientWidth ?? dimensions.width;
+      const curH = container?.clientHeight ?? dimensions.height;
+      const targetScale = Math.min(
+        Math.max(MIN_SCALE, Math.min(curW / paddedW, curH / paddedH)),
+        MAX_SCALE
+      );
+      const targetPos = {
+        x: curW / 2 - boxCenterX * targetScale,
+        y: curH / 2 - boxCenterY * targetScale,
+      };
+
+      // Capture current values for animation start
+      const stage = stageRef.current;
+      const startScale = stage?.scaleX() ?? 1;
+      const startPos = stage ? { x: stage.x(), y: stage.y() } : { x: 0, y: 0 };
+
+      // Animate with requestAnimationFrame + ease-out cubic over 600ms
+      const duration = 600;
+      let startTime: number | null = null;
+
+      const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+      const animate = (timestamp: number) => {
+        if (startTime === null) startTime = timestamp;
+        const elapsed = timestamp - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = easeOutCubic(progress);
+
+        const currentScale = startScale + (targetScale - startScale) * eased;
+        const currentPos = {
+          x: startPos.x + (targetPos.x - startPos.x) * eased,
+          y: startPos.y + (targetPos.y - startPos.y) * eased,
+        };
+
+        setScale(currentScale);
+        setStagePos(currentPos);
+
+        if (progress < 1) {
+          fitAnimationRef.current = requestAnimationFrame(animate);
+        } else {
+          fitAnimationRef.current = null;
+        }
+      };
+
+      fitAnimationRef.current = requestAnimationFrame(animate);
+    });
+
+    return () => {
+      unsub();
+      if (fitAnimationRef.current !== null) {
+        cancelAnimationFrame(fitAnimationRef.current);
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keep stable refs so native Konva listeners always call the latest versions
   const broadcastLiveMoveRef = useRef(broadcastLiveMove);
   broadcastLiveMoveRef.current = broadcastLiveMove;

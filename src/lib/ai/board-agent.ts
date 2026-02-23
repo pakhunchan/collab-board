@@ -349,6 +349,7 @@ const MAX_TURNS = 10;
 export interface AgentResult {
   message: string;
   createdObjects: BoardObject[];
+  updatedObjectIds: string[];
 }
 
 export const runBoardAgent = traceable(
@@ -373,6 +374,7 @@ export const runBoardAgent = traceable(
   ];
 
   const createdObjects: BoardObject[] = [];
+  const updatedObjectIds: string[] = [];
   const channel = await createPersistentChannel(boardId);
 
   try {
@@ -397,6 +399,7 @@ export const runBoardAgent = traceable(
       return {
         message: assistantMessage.content ?? "Done.",
         createdObjects,
+        updatedObjectIds,
       };
     }
 
@@ -451,6 +454,7 @@ export const runBoardAgent = traceable(
                   boardId,
                   channel
                 );
+                updatedObjectIds.push(a.id as string);
                 results.push({ action: "update", ok: true, id: a.id as string });
               } catch (err) {
                 results.push({ action: "update", id: a.id as string, error: err instanceof Error ? err.message : "Unknown error" });
@@ -473,6 +477,7 @@ export const runBoardAgent = traceable(
   return {
     message: "Reached maximum number of turns. Some actions may not have completed.",
     createdObjects,
+    updatedObjectIds,
   };
   } finally {
     channel.close();

@@ -39,6 +39,11 @@ interface BoardStore {
   selectedIds: string[];
   setSelectedIds: (ids: string[]) => void;
   clearSelection: () => void;
+
+  // Fit viewport
+  fitToObjectIds: string[] | null;
+  requestFitToObjects: (ids: string[]) => void;
+  clearFitToObjects: () => void;
 }
 
 export const useBoardStore = create<BoardStore>((set, get) => ({
@@ -170,4 +175,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   selectedIds: [],
   setSelectedIds: (ids) => set({ selectedIds: ids }),
   clearSelection: () => set({ selectedIds: [] }),
+
+  fitToObjectIds: null,
+  requestFitToObjects: (ids) => set({ fitToObjectIds: ids }),
+  clearFitToObjects: () => set({ fitToObjectIds: null }),
 }));

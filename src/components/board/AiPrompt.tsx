@@ -7,6 +7,7 @@ import { useBoardStore } from "@/stores/boardStore";
 export default function AiPrompt({ boardId }: { boardId: string }) {
   const { user } = useAuth();
   const viewport = useBoardStore((s) => s.viewport);
+  const requestFitToObjects = useBoardStore((s) => s.requestFitToObjects);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,6 +40,13 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
         } else {
           setResponse(data.message);
           setPrompt("");
+          const createdIds = (data.createdObjects ?? []).map((o: { id: string }) => o.id);
+          const updatedIds = data.updatedObjectIds ?? [];
+          const allIds = [...createdIds, ...updatedIds];
+          console.log("[AiPrompt] createdIds:", createdIds, "updatedIds:", updatedIds, "allIds:", allIds);
+          if (allIds.length > 0) {
+            requestFitToObjects(allIds);
+          }
         }
       } catch {
         setResponse("Error: Failed to reach AI service");
@@ -46,7 +54,7 @@ export default function AiPrompt({ boardId }: { boardId: string }) {
         setLoading(false);
       }
     },
-    [prompt, user, loading, boardId, viewport]
+    [prompt, user, loading, boardId, viewport, requestFitToObjects]
   );
 
   if (!open) {
