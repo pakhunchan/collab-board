@@ -37,7 +37,7 @@ When placing multiple objects, ensure at least 20px gap between all edges. An ob
 Arrange multiple shapes towards the center, in a grid, with spacing. Do NOT create objects that touch or overlap with other objects.`;
 }
 
-const SUMMARY_SYSTEM_PROMPT = "Briefly describe what you did on the whiteboard. One short sentence.";
+const SUMMARY_SYSTEM_PROMPT = "Briefly describe what you did on the whiteboard. One short sentence. Never ask the user questions or request clarification — just summarize the actions taken.";
 
 const tools: ChatCompletionTool[] = [
   {
@@ -384,7 +384,7 @@ export const runBoardAgent = traceable(
     }
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1-nano",
+      model: "gpt-4.1-mini",
       messages,
       tools: turn === 0 ? tools : undefined,
       tool_choice: turn === 0 ? "required" : undefined,
