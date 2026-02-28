@@ -2,6 +2,8 @@
 
 Real-time collaborative whiteboard with AI-powered board manipulation. Features multiplayer sync, an AI assistant for natural language commands, and an infinite canvas.
 
+**Try it out:** [collab.pakhunchan.com](https://collab.pakhunchan.com/)
+
 ## Features
 
 ### Canvas
